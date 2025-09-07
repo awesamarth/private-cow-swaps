@@ -12,17 +12,17 @@ import {CurrencySettler} from "@uniswap/v4-core/test/utils/CurrencySettler.sol";
 import {SwapParams} from "v4-core/types/PoolOperation.sol";
 
 /**
- * @title PrivateCoWHook
- * @notice A Uniswap V4 Hook for Coincidence of Wants (CoW) matching
- * @dev Intercepts swaps to find opposite orders and execute CoW trades
+ * @title PrivateCowHook
+ * @notice A Uniswap V4 Hook for Coincidence of Wants (Cow) matching
+ * @dev Intercepts swaps to find opposite orders and execute Cow trades
  */
-contract PrivateCoWHook is BaseHook {
+contract PrivateCowHook is BaseHook {
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
 
     // Events
-    event CoWOrderPlaced(
+    event CowOrderPlaced(
         address indexed trader,
         PoolId indexed poolId,
         uint256 indexed orderId,
@@ -31,7 +31,7 @@ contract PrivateCoWHook is BaseHook {
         bool zeroForOne
     );
 
-    event CoWTradeExecuted(
+    event CowTradeExecuted(
         address indexed buyer,
         address indexed seller,
         PoolId indexed poolId,
@@ -40,15 +40,10 @@ contract PrivateCoWHook is BaseHook {
         uint256 executionPrice
     );
 
-    event CoWMatchSettled(
-        bytes32 indexed matchHash,
-        address indexed buyer,
-        address indexed seller,
-        uint256 amount
-    );
+    event CowMatchSettled(bytes32 indexed matchHash, address indexed buyer, address indexed seller, uint256 amount);
 
     // Order struct
-    struct CoWOrder {
+    struct CowOrder {
         address trader;
         uint256 amountIn;
         uint256 minAmountOut;
@@ -59,12 +54,9 @@ contract PrivateCoWHook is BaseHook {
 
     // State variables
     uint256 public nextOrderId = 1;
-    mapping(uint256 => CoWOrder) public orders;
-    mapping(PoolId => uint256[]) public activeBuyOrders;  // zeroForOne = true
-    mapping(PoolId => uint256[]) public activeSellOrders; // zeroForOne = false
+    mapping(uint256 => CowOrder) public orders;
     mapping(address => uint256[]) public traderOrders;
     mapping(bytes32 => bool) public settledMatches;
-
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
@@ -93,154 +85,61 @@ contract PrivateCoWHook is BaseHook {
     /**
      * @dev Main hook function - intercepts all swaps
      */
-    function _beforeSwap(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata
-    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         PoolId poolId = key.toId();
-        uint256 amountSpecified = params.amountSpecified < 0
-            ? uint256(-params.amountSpecified)
+        
+        // CSMM jaise absolute value nikaal
+        uint256 amountSpecified = params.amountSpecified < 0 
+            ? uint256(-params.amountSpecified) 
             : uint256(params.amountSpecified);
         
-
-        // Try to find immediate CoW match
-       // gonna emit an event here
-    }
-
-
-    /**
-     * @dev Execute immediate CoW trade when match found
-     */
-    function _executeCoWTrade(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params,
-        uint256 matchedOrderId
-    ) internal returns (bytes4, BeforeSwapDelta, uint24) {
-        CoWOrder storage matchedOrder = orders[matchedOrderId];
-        PoolId poolId = key.toId();
-
-        uint256 amountSpecified = params.amountSpecified < 0
-            ? uint256(-params.amountSpecified)
-            : uint256(params.amountSpecified);
-
-        // Calculate trade amounts (1:1 for simplicity)
-        uint256 amountIn = amountSpecified;
-        uint256 amountOut = matchedOrder.amountIn;
-
-        // Update order state
-        matchedOrder.isActive = false;
-        _removeFromActiveOrders(poolId, matchedOrderId, !params.zeroForOne);
-
-        // Create delta for swap execution - this tells Pool Manager how to move tokens
-        int128 specifiedDelta;
-        int128 unspecifiedDelta;
-
-        if (params.zeroForOne) {
-            // token0 -> token1: sender loses token0, gains token1
-            specifiedDelta = -int128(int256(amountIn));
-            unspecifiedDelta = int128(int256(amountOut));
-        } else {
-            // token1 -> token0: sender loses token1, gains token0  
-            specifiedDelta = -int128(int256(amountIn));
-            unspecifiedDelta = int128(int256(amountOut));
-        }
-
-        // This delta completely replaces the AMM swap
-        BeforeSwapDelta cowDelta = toBeforeSwapDelta(specifiedDelta, unspecifiedDelta);
-
-        // Emit successful CoW execution
-        emit CoWTradeExecuted(
-            params.zeroForOne ? sender : matchedOrder.trader, // buyer
-            params.zeroForOne ? matchedOrder.trader : sender, // seller
-            poolId,
-            amountIn,
-            amountOut,
-            (amountOut * 1e18) / amountIn // execution price
-        );
-
-        return (this.beforeSwap.selector, cowDelta, 0);
-    }
-
-    /**
-     * @dev Create pending order when no immediate match found
-     */
-    function _createPendingOrder(
-        address sender,
-        PoolKey calldata key,
-        SwapParams calldata params
-    ) internal returns (bytes4, BeforeSwapDelta, uint24) {
-        PoolId poolId = key.toId();
-        uint256 amountSpecified = params.amountSpecified < 0
-            ? uint256(-params.amountSpecified)
-            : uint256(params.amountSpecified);
-
-        // Create the order
+        // Order create kar
         uint256 orderId = nextOrderId++;
-        orders[orderId] = CoWOrder({
-            trader: sender,
+        orders[orderId] = CowOrder({
+            trader: tx.origin,
             amountIn: amountSpecified,
-            minAmountOut: (amountSpecified * 95) / 100, // 5% slippage tolerance
+            minAmountOut: (amountSpecified * 95) / 100,
             zeroForOne: params.zeroForOne,
-            deadline: block.timestamp + 1 hours, // 1 hour expiry
+            deadline: block.timestamp + 1 hours,
             isActive: true
         });
-
-        // Track the order
-        traderOrders[sender].push(orderId);
+        
+        traderOrders[tx.origin].push(orderId);
+        emit CowOrderPlaced(sender, poolId, orderId, amountSpecified, (amountSpecified * 95) / 100, params.zeroForOne);
+        
+        // CSMM pattern - proper int128 conversion
+        int128 absAmount = int128(int256(amountSpecified));
+        
+        // Take tokens like CSMM does
         if (params.zeroForOne) {
-            activeBuyOrders[poolId].push(orderId);
+            key.currency0.take(poolManager, address(this), amountSpecified, true);
         } else {
-            activeSellOrders[poolId].push(orderId);
+            key.currency1.take(poolManager, address(this), amountSpecified, true);
         }
-
-        // Emit order creation event (AVS will listen to this)
-        emit CoWOrderPlaced(
-            sender,
-            poolId,
-            orderId,
-            amountSpecified,
-            (amountSpecified * 95) / 100,
-            params.zeroForOne
+        
+        // Delta - CSMM style with proper signs
+        BeforeSwapDelta holdDelta = toBeforeSwapDelta(
+            params.amountSpecified < 0 ? absAmount : -absAmount,  // Input delta
+            0  // No output yet
         );
-
-        // Create delta that takes user's tokens but stops the AMM swap
-        int128 specifiedDelta = -int128(int256(amountSpecified)); // Take their input tokens
-        int128 unspecifiedDelta = int128(int256(amountSpecified)); // Give back same amount (1:1 hold)
-
-        BeforeSwapDelta holdDelta = toBeforeSwapDelta(specifiedDelta, unspecifiedDelta);
-
+        
         return (this.beforeSwap.selector, holdDelta, 0);
     }
 
-    /**
-     * @dev Remove order from active lists
-     */
-    function _removeFromActiveOrders(
-        PoolId poolId,
-        uint256 orderId,
-        bool isBuyOrder
-    ) internal {
-        uint256[] storage ordersList = isBuyOrder
-            ? activeBuyOrders[poolId]
-            : activeSellOrders[poolId];
 
-        for (uint256 i = 0; i < ordersList.length; i++) {
-            if (ordersList[i] == orderId) {
-                ordersList[i] = ordersList[ordersList.length - 1];
-                ordersList.pop();
-                break;
-            }
-        }
-    }
+
+
+
 
     /**
-     * @dev AVS function to settle complex CoW matches found off-chain
+     * @dev AVS function to settle complex Cow matches found off-chain
      * Note: In production, operator validation would be done by DarkPoolServiceManager
      */
-    function settleCoWMatches(
+    function settleCowMatches(
         bytes32[] calldata matchHashes,
         address[] calldata buyers,
         address[] calldata sellers,
@@ -248,11 +147,9 @@ contract PrivateCoWHook is BaseHook {
     ) external {
         // TODO: Add operator validation via DarkPoolServiceManager
         // require(serviceManager.isValidOperator(msg.sender), "Not a valid operator");
-        
+
         require(
-            matchHashes.length == buyers.length &&
-            buyers.length == sellers.length &&
-            sellers.length == amounts.length,
+            matchHashes.length == buyers.length && buyers.length == sellers.length && sellers.length == amounts.length,
             "Array length mismatch"
         );
 
@@ -260,7 +157,7 @@ contract PrivateCoWHook is BaseHook {
             // Mark as settled (no token transfers needed - Pool Manager handles it)
             settledMatches[matchHashes[i]] = true;
 
-            emit CoWMatchSettled(matchHashes[i], buyers[i], sellers[i], amounts[i]);
+            emit CowMatchSettled(matchHashes[i], buyers[i], sellers[i], amounts[i]);
         }
     }
 
@@ -268,7 +165,7 @@ contract PrivateCoWHook is BaseHook {
      * @dev Cancel an order
      */
     function cancelOrder(uint256 orderId) external {
-        CoWOrder storage order = orders[orderId];
+        CowOrder storage order = orders[orderId];
         require(order.trader == msg.sender, "Not your order");
         require(order.isActive, "Order not active");
 
@@ -277,17 +174,10 @@ contract PrivateCoWHook is BaseHook {
     }
 
     // View functions
-    function getOrder(uint256 orderId) external view returns (CoWOrder memory) {
+    function getOrder(uint256 orderId) external view returns (CowOrder memory) {
         return orders[orderId];
     }
 
-    function getActiveBuyOrders(PoolId poolId) external view returns (uint256[] memory) {
-        return activeBuyOrders[poolId];
-    }
-
-    function getActiveSellOrders(PoolId poolId) external view returns (uint256[] memory) {
-        return activeSellOrders[poolId];
-    }
 
     function getTraderOrders(address trader) external view returns (uint256[] memory) {
         return traderOrders[trader];
