@@ -10,6 +10,7 @@ import {BeforeSwapDelta, toBeforeSwapDelta} from "v4-core/types/BeforeSwapDelta.
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {CurrencySettler} from "@uniswap/v4-core/test/utils/CurrencySettler.sol";
 import {SwapParams} from "v4-core/types/PoolOperation.sol";
+import {console} from "forge-std/console.sol";
 
 /**
  * @title PrivateCowHook
@@ -26,8 +27,7 @@ contract PrivateCowHook is BaseHook {
         address indexed trader,
         PoolId indexed poolId,
         uint256 indexed orderId,
-        uint256 amountIn,
-        uint256 minAmountOut,
+        int256 amountIn,
         bool zeroForOne
     );
 
@@ -40,16 +40,33 @@ contract PrivateCowHook is BaseHook {
         uint256 executionPrice
     );
 
-    event CowMatchSettled(bytes32 indexed matchHash, address indexed buyer, address indexed seller, uint256 amount);
-
+    event CowMatchSettled(
+        bytes32 indexed matchHash,
+        address indexed buyer,
+        address indexed seller,
+        uint256 amount
+    );
+    event HookModifyLiquidity(
+        bytes32 indexed id,
+        address indexed sender,
+        int128 amount0,
+        int128 amount1
+    );
     // Order struct
+
     struct CowOrder {
         address trader;
-        uint256 amountIn;
-        uint256 minAmountOut;
+        int256 amountIn;
         bool zeroForOne;
         uint256 deadline;
         bool isActive;
+    }
+
+    struct CallbackData {
+        uint256 amountEach;
+        Currency currency0;
+        Currency currency1;
+        address sender;
     }
 
     // State variables
@@ -60,80 +77,99 @@ contract PrivateCowHook is BaseHook {
 
     constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
 
+    function addLiquidity(PoolKey calldata key, uint256 amountEach) external {
+        poolManager.unlock(
+            abi.encode(
+                CallbackData(
+                    amountEach,
+                    key.currency0,
+                    key.currency1,
+                    msg.sender
+                )
+            )
+        );
+
+        emit HookModifyLiquidity(
+            PoolId.unwrap(key.toId()),
+            address(this),
+            int128(uint128(amountEach)),
+            int128(uint128(amountEach))
+        );
+    }
+
     /**
      * @dev Get hook permissions
      */
-    function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
-        return Hooks.Permissions({
-            beforeInitialize: false,
-            afterInitialize: false,
-            beforeAddLiquidity: false,
-            afterAddLiquidity: false,
-            beforeRemoveLiquidity: false,
-            afterRemoveLiquidity: false,
-            beforeSwap: true,
-            afterSwap: false,
-            beforeDonate: false,
-            afterDonate: false,
-            beforeSwapReturnDelta: true,
-            afterSwapReturnDelta: false,
-            afterAddLiquidityReturnDelta: false,
-            afterRemoveLiquidityReturnDelta: false
-        });
+    function getHookPermissions()
+        public
+        pure
+        override
+        returns (Hooks.Permissions memory)
+    {
+        return
+            Hooks.Permissions({
+                beforeInitialize: false,
+                afterInitialize: false,
+                beforeAddLiquidity: false,
+                afterAddLiquidity: false,
+                beforeRemoveLiquidity: false,
+                afterRemoveLiquidity: false,
+                beforeSwap: true,
+                afterSwap: false,
+                beforeDonate: false,
+                afterDonate: false,
+                beforeSwapReturnDelta: true,
+                afterSwapReturnDelta: false,
+                afterAddLiquidityReturnDelta: false,
+                afterRemoveLiquidityReturnDelta: false
+            });
     }
 
     /**
      * @dev Main hook function - intercepts all swaps
      */
-    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
-        internal
-        override
-        returns (bytes4, BeforeSwapDelta, uint24)
-    {
+    function _beforeSwap(
+        address sender,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        bytes calldata 
+    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         PoolId poolId = key.toId();
-        
-        // CSMM jaise absolute value nikaal
-        uint256 amountSpecified = params.amountSpecified < 0 
-            ? uint256(-params.amountSpecified) 
-            : uint256(params.amountSpecified);
-        
-        // Order create kar
+
+        if (params.zeroForOne == false) {
+            revert();
+        }
+
         uint256 orderId = nextOrderId++;
         orders[orderId] = CowOrder({
-            trader: tx.origin,
-            amountIn: amountSpecified,
-            minAmountOut: (amountSpecified * 95) / 100,
+            trader: sender,
+            amountIn: params.amountSpecified,
             zeroForOne: params.zeroForOne,
             deadline: block.timestamp + 1 hours,
             isActive: true
         });
-        
-        traderOrders[tx.origin].push(orderId);
-        emit CowOrderPlaced(sender, poolId, orderId, amountSpecified, (amountSpecified * 95) / 100, params.zeroForOne);
-        
-        // CSMM pattern - proper int128 conversion
-        int128 absAmount = int128(int256(amountSpecified));
-        
-        // Take tokens like CSMM does
-        if (params.zeroForOne) {
-            key.currency0.take(poolManager, address(this), amountSpecified, true);
-        } else {
-            key.currency1.take(poolManager, address(this), amountSpecified, true);
-        }
-        
-        // Delta - CSMM style with proper signs
+
+
+        // Create the delta
         BeforeSwapDelta holdDelta = toBeforeSwapDelta(
-            params.amountSpecified < 0 ? absAmount : -absAmount,  // Input delta
-            0  // No output yet
+            int128(-params.amountSpecified),
+            0
         );
-        
+
+        // Log what delta values we're returning
+        console.log("Returning specified delta:", int128(-params.amountSpecified));
+
+        traderOrders[sender].push(orderId);
+        emit CowOrderPlaced(
+            sender,
+            poolId,
+            orderId,
+            params.amountSpecified,
+            params.zeroForOne
+        );
+
         return (this.beforeSwap.selector, holdDelta, 0);
     }
-
-
-
-
-
 
     /**
      * @dev AVS function to settle complex Cow matches found off-chain
@@ -149,7 +185,9 @@ contract PrivateCowHook is BaseHook {
         // require(serviceManager.isValidOperator(msg.sender), "Not a valid operator");
 
         require(
-            matchHashes.length == buyers.length && buyers.length == sellers.length && sellers.length == amounts.length,
+            matchHashes.length == buyers.length &&
+                buyers.length == sellers.length &&
+                sellers.length == amounts.length,
             "Array length mismatch"
         );
 
@@ -157,7 +195,12 @@ contract PrivateCowHook is BaseHook {
             // Mark as settled (no token transfers needed - Pool Manager handles it)
             settledMatches[matchHashes[i]] = true;
 
-            emit CowMatchSettled(matchHashes[i], buyers[i], sellers[i], amounts[i]);
+            emit CowMatchSettled(
+                matchHashes[i],
+                buyers[i],
+                sellers[i],
+                amounts[i]
+            );
         }
     }
 
@@ -178,8 +221,9 @@ contract PrivateCowHook is BaseHook {
         return orders[orderId];
     }
 
-
-    function getTraderOrders(address trader) external view returns (uint256[] memory) {
+    function getTraderOrders(
+        address trader
+    ) external view returns (uint256[] memory) {
         return traderOrders[trader];
     }
 }
