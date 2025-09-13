@@ -1,0 +1,20 @@
+{
+	"name": "cow-avs-operator",
+	"version": "1.0.0",
+	"description": "CoW AVS Operator for private order matching",
+	"main": "cow-operator.ts",
+	"scripts": {
+		"start": "tsx cow-operator.ts",
+		"build": "tsc",
+		"dev": "tsx watch cow-operator.ts"
+	},
+	"dependencies": {
+		"dotenv": "^17.2.2",
+		"viem": "^2.37.5"
+	},
+	"devDependencies": {
+		"@types/node": "^20.19.14",
+		"tsx": "^4.20.5",
+		"typescript": "^5.9.2"
+	}
+}

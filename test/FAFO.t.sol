@@ -35,7 +35,7 @@ contract CSMMTest is Test, Deployers {
                     Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
             )
         );
-        deployCodeTo("PrivateCow.sol", abi.encode(manager), hookAddress);
+        deployCodeTo("FAFO.sol", abi.encode(manager), hookAddress);
         hook = CSMM(hookAddress);
 
         (key, ) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);

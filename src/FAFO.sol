@@ -20,7 +20,7 @@ import {console} from "forge-std/console.sol";
 // In practice, we don't usually see this in prod since depegs can happen and we dont want exact equal amounts
 // But is a nice little NoOp hook example
 
-contract PrivateCow is BaseHook {
+contract FAFO is BaseHook {
     using CurrencySettler for Currency;
 
     error AddLiquidityThroughHook();
