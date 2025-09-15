@@ -26,7 +26,7 @@ contract PrivateCow is BaseHook {
     error AddLiquidityThroughHook();
 
     // router of the swap
-    event HookSwap( // v4 pool id
+    event HookSwap(
         bytes32 indexed id,
         address indexed sender,
         int128 amountInput,
@@ -45,7 +45,6 @@ contract PrivateCow is BaseHook {
         address sender;
     }
 
-    // AVS operator management
     mapping(address => bool) public operators;
     mapping(address => uint256) public operatorStake;
 

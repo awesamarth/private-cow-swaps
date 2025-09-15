@@ -18,6 +18,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 interface CowOrder {
+    id: string;
     trader: Address;
     amountInput: bigint;
     amountWanted: bigint;
@@ -25,13 +26,15 @@ interface CowOrder {
     poolId: Hash;
     timestamp: number;
     blockNumber: bigint;
+    price: bigint; // Price as amountWanted/amountInput for sorting
 }
 
-interface CowMatch {
-    buyOrder: CowOrder;
-    sellOrder: CowOrder;
-    matchId: string;  // Simple string ID instead of hash
-    executionPrice: bigint;
+interface OrderMatch {
+    buyOrders: CowOrder[];  // Can be multiple small orders
+    sellOrders: CowOrder[]; // Can be multiple small orders
+    totalBuyAmount: bigint;
+    totalSellAmount: bigint;
+    clearingPrice: bigint;
     timestamp: number;
 }
 
@@ -46,7 +49,9 @@ class CowAVSOperator {
     private serviceManager: any;
     private taskManager: any;
     
-    private pendingOrders: Map<string, CowOrder> = new Map();
+    // Separate order books for buy (zeroForOne=true) and sell (zeroForOne=false)
+    private buyOrders: CowOrder[] = [];  // zeroForOne = true
+    private sellOrders: CowOrder[] = []; // zeroForOne = false
     private isOperatorRegistered: boolean = false;
 
     constructor(
@@ -216,7 +221,7 @@ class CowAVSOperator {
             client: { public: this.publicClient, wallet: this.walletClient }
         });
 
-        console.log("🤖 CoW AVS Operator initialized");
+        console.log(" CoW AVS Operator initialized");
         console.log(`   Operator Address: ${this.account.address}`);
         console.log(`   PRIVATE_COW Contract: ${privateCowAddress}`);
         console.log(`   Service Manager: ${serviceManagerAddress}`);
@@ -228,44 +233,44 @@ class CowAVSOperator {
      */
     async initialize(): Promise<void> {
         try {
-            console.log("🚀 Initializing CoW AVS Operator...");
+            console.log(" Initializing CoW AVS Operator...");
 
             // Check if already registered with service manager
             const isRegistered = await this.serviceManager.read.isValidOperator([this.account.address]);
             
             if (!isRegistered) {
-                console.log("📝 Registering with Service Manager...");
+                console.log(" Registering with Service Manager...");
                 const regTx = await this.serviceManager.write.registerOperator({
                     value: parseEther("0.01"), // 0.01 ETH stake
                     gas: 200000n
                 });
                 console.log(`   Registration TX: ${regTx}`);
                 await this.publicClient.waitForTransactionReceipt({ hash: regTx });
-                console.log("✅ Registered with Service Manager");
+                console.log(" Registered with Service Manager");
             } else {
-                console.log("✅ Already registered with Service Manager");
+                console.log(" Already registered with Service Manager");
             }
 
             // Check if registered with PRIVATE_COW
             const isOperator = await this.privateCowContract.read.operators([this.account.address]);
             if (!isOperator) {
-                console.log("📝 Registering with PRIVATE_COW contract...");
+                console.log(" Registering with PRIVATE_COW contract...");
                 const regTx = await this.privateCowContract.write.registerOperator({
                     value: parseEther("0.01"),
                     gas: 200000n
                 });
                 await this.publicClient.waitForTransactionReceipt({ hash: regTx });
-                console.log("✅ Registered with PRIVATE_COW contract");
+                console.log(" Registered with PRIVATE_COW contract");
             }
 
             this.isOperatorRegistered = true;
             this.startEventListeners();
 
-            console.log("✅ CoW AVS Operator initialized successfully");
-            console.log("🎯 Listening for CoW orders and creating matches...");
+            console.log(" CoW AVS Operator initialized successfully");
+            console.log(" Listening for CoW orders and creating matches...");
 
         } catch (error) {
-            console.error("❌ Failed to initialize:", error);
+            console.error(" Failed to initialize:", error);
             throw error;
         }
     }
@@ -293,7 +298,7 @@ class CowAVSOperator {
             onLogs: async (logs) => {
                 for (const log of logs) {
                     const { id: poolId, sender, amountInput, amountWanted, zeroForOne } = log.args;
-                    console.log(`📝 New order detected:`);
+                    console.log(` New order detected:`);
                     console.log(`   Trader: ${sender!.slice(0, 8)}...`);
                     console.log(`   Amount In: ${formatEther(BigInt(amountInput!))}`);
                     console.log(`   Amount Wanted: ${formatEther(amountWanted!)}`);
@@ -321,7 +326,7 @@ class CowAVSOperator {
                 for (const log of logs) {
                     const { taskIndex, matchHash, creator, reward } = log.args;
                     if (creator!.toLowerCase() !== this.account.address.toLowerCase()) {
-                        console.log(`🎯 New task detected: ${taskIndex}`);
+                        console.log(` New task detected: ${taskIndex}`);
                         console.log(`   Match Hash: ${matchHash!.slice(0, 10)}...`);
                         console.log(`   Reward: ${formatEther(reward!)} ETH`);
                         
@@ -345,7 +350,7 @@ class CowAVSOperator {
             onLogs: (logs:any) => {
                 for (const log of logs) {
                     const { taskIndex, consensusResponse } = log.args;
-                    console.log(`✅ Consensus achieved for task ${taskIndex}`);
+                    console.log(` Consensus achieved for task ${taskIndex}`);
                     console.log(`   Response: ${consensusResponse.slice(0, 10)}...`);
                 }
             }
@@ -353,7 +358,7 @@ class CowAVSOperator {
     }
 
     /**
-     * Handle new order by storing it and looking for matches
+     * Handle new order by storing it in appropriate order book and looking for matches
      */
     private async handleNewOrder(
         poolId: Hash,
@@ -362,59 +367,69 @@ class CowAVSOperator {
         amountWanted: bigint,
         zeroForOne: boolean
     ): Promise<void> {
-        const orderKey = `${trader}-${poolId}-${Date.now()}`;
-        
+        const orderId = `${trader}-${poolId}-${Date.now()}`;
+
+        // Calculate price for sorting (amountWanted per amountInput)
+        const price = (amountWanted * BigInt(10000)) / amountInput; // Scaled for precision
+
         const order: CowOrder = {
+            id: orderId,
             trader,
             amountInput: BigInt(amountInput.toString()),
             amountWanted: BigInt(amountWanted.toString()),
             zeroForOne,
             poolId,
             timestamp: Date.now(),
-            blockNumber: await this.publicClient.getBlockNumber()
+            blockNumber: await this.publicClient.getBlockNumber(),
+            price
         };
 
-        this.pendingOrders.set(orderKey, order);
-        console.log(`   📦 Stored order: ${this.pendingOrders.size} total pending`);
+        // Add to appropriate order book
+        if (zeroForOne) {
+            this.buyOrders.push(order);
+            // Sort buy orders by price descending (highest price first)
+            this.buyOrders.sort((a, b) => b.price > a.price ? 1 : -1);
+            console.log(`    Added buy order: ${this.buyOrders.length} total buy orders`);
+        } else {
+            this.sellOrders.push(order);
+            // Sort sell orders by price ascending (lowest price first)
+            this.sellOrders.sort((a, b) => a.price > b.price ? 1 : -1);
+            console.log(`    Added sell order: ${this.sellOrders.length} total sell orders`);
+        }
 
-        // Look for matches
-        const matches = this.findCowMatches();
+        // Look for matches using improved algorithm
+        const matches = this.findOrderMatches();
         if (matches.length > 0) {
-            await this.createMatchingTask(matches);
+            await this.processOrderMatches(matches);
         }
     }
 
     /**
-     * Find CoW matches among pending orders
+     * Find order matches using improved batch clearing algorithm
      */
-    private findCowMatches(): CowMatch[] {
-        const matches: CowMatch[] = [];
-        const orders = Array.from(this.pendingOrders.entries());
+    private findOrderMatches(): OrderMatch[] {
+        const matches: OrderMatch[] = [];
 
-        for (let i = 0; i < orders.length; i++) {
-            for (let j = i + 1; j < orders.length; j++) {
-                const [key1, order1] = orders[i];
-                const [key2, order2] = orders[j];
+        if (this.buyOrders.length === 0 || this.sellOrders.length === 0) {
+            return matches;
+        }
 
-                if (this.canMatch(order1, order2)) {
-                    const match: CowMatch = {
-                        buyOrder: order1.zeroForOne ? order1 : order2,
-                        sellOrder: order1.zeroForOne ? order2 : order1,
-                        matchId: `${key1}-${key2}-${Date.now()}`, // Simple string ID
-                        executionPrice: this.calculatePrice(order1, order2),
-                        timestamp: Date.now()
-                    };
+        // Strategy: Start with largest order and try to fill it with multiple counter-orders
+        // Try to match buy orders against sell orders
+        const largeBuyOrders = this.buyOrders.filter(order => order.amountInput >= parseEther("10")); // Orders > 10 tokens
+        for (const buyOrder of largeBuyOrders) {
+            const match = this.findMatchingOrders(buyOrder, this.sellOrders, true);
+            if (match && match.sellOrders.length > 0) {
+                matches.push(match);
+            }
+        }
 
-                    matches.push(match);
-
-                    // Remove matched orders
-                    this.pendingOrders.delete(key1);
-                    this.pendingOrders.delete(key2);
-
-                    console.log(`🔄 Found CoW match: ${order1.trader.slice(0, 8)}... ↔ ${order2.trader.slice(0, 8)}...`);
-                    console.log(`   Price: ${formatEther(match.executionPrice)}`);
-                    break;
-                }
+        // Try to match sell orders against buy orders
+        const largeSellOrders = this.sellOrders.filter(order => order.amountInput >= parseEther("10"));
+        for (const sellOrder of largeSellOrders) {
+            const match = this.findMatchingOrders(sellOrder, this.buyOrders, false);
+            if (match && match.buyOrders.length > 0) {
+                matches.push(match);
             }
         }
 
@@ -422,37 +437,83 @@ class CowAVSOperator {
     }
 
     /**
-     * Check if two orders can be matched
+     * Find orders that can match against a target order
      */
-    private canMatch(order1: CowOrder, order2: CowOrder): boolean {
+    private findMatchingOrders(targetOrder: CowOrder, counterOrders: CowOrder[], targetIsBuy: boolean): OrderMatch | null {
+        const matchingOrders: CowOrder[] = [];
+        let totalMatchedAmount = BigInt(0);
+        let targetAmount = targetOrder.amountInput;
+
+        // Filter compatible orders (same pool, can cross)
+        const compatibleOrders = counterOrders.filter(order =>
+            order.poolId === targetOrder.poolId &&
+            this.canOrdersCross(targetOrder, order)
+        );
+
+        // Aggregate orders until we can fill the target order
+        for (const order of compatibleOrders) {
+            if (totalMatchedAmount >= targetAmount) break;
+
+            const remainingAmount = targetAmount - totalMatchedAmount;
+            const useableAmount = order.amountInput < remainingAmount ? order.amountInput : remainingAmount;
+
+            if (useableAmount > 0) {
+                matchingOrders.push(order);
+                totalMatchedAmount += useableAmount;
+            }
+        }
+
+        // Only create match if we can fill significant portion (>50%) of target order
+        if (totalMatchedAmount >= (targetAmount * BigInt(50)) / BigInt(100)) {
+            const clearingPrice = this.calculateClearingPrice(targetOrder, matchingOrders);
+
+            return {
+                buyOrders: targetIsBuy ? [targetOrder] : matchingOrders,
+                sellOrders: targetIsBuy ? matchingOrders : [targetOrder],
+                totalBuyAmount: targetIsBuy ? targetOrder.amountInput : totalMatchedAmount,
+                totalSellAmount: targetIsBuy ? totalMatchedAmount : targetOrder.amountInput,
+                clearingPrice,
+                timestamp: Date.now()
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if two orders can cross (have compatible prices)
+     */
+    private canOrdersCross(buyOrder: CowOrder, sellOrder: CowOrder): boolean {
+        // Buy order price should be >= sell order price for crossing
+        // Buy price: how much they'll pay per unit
+        // Sell price: how much they want per unit
         return (
-            order1.poolId === order2.poolId &&
-            order1.zeroForOne !== order2.zeroForOne && // Opposite directions
-            order1.trader !== order2.trader && // Different traders
-            this.amountsCanMatch(order1, order2) // Compatible amounts
+            buyOrder.trader !== sellOrder.trader &&
+            buyOrder.price >= sellOrder.price // Buy price >= sell price
         );
     }
 
     /**
-     * Check if order amounts are compatible for matching
+     * Calculate clearing price for a batch of orders
      */
-    private amountsCanMatch(order1: CowOrder, order2: CowOrder): boolean {
-        // Simple matching: both orders should be within 10% of each other
-        const ratio1 = (order1.amountInput * BigInt(100)) / order1.amountWanted;
-        const ratio2 = (order2.amountWanted * BigInt(100)) / order2.amountInput;
-        
-        const diff = ratio1 > ratio2 ? ratio1 - ratio2 : ratio2 - ratio1;
-        return diff <= BigInt(10); // 10% tolerance
-    }
+    private calculateClearingPrice(targetOrder: CowOrder, matchingOrders: CowOrder[]): bigint {
+        if (matchingOrders.length === 0) return targetOrder.price;
 
-    /**
-     * Calculate execution price for matched orders
-     */
-    private calculatePrice(order1: CowOrder, order2: CowOrder): bigint {
-        // Use midpoint pricing
-        const price1 = (order1.amountInput * parseEther("1")) / order1.amountWanted;
-        const price2 = (order2.amountWanted * parseEther("1")) / order2.amountInput;
-        return (price1 + price2) / BigInt(2);
+        // Use volume-weighted average price
+        let totalVolume = BigInt(0);
+        let weightedPriceSum = BigInt(0);
+
+        for (const order of matchingOrders) {
+            const volume = order.amountInput;
+            totalVolume += volume;
+            weightedPriceSum += order.price * volume;
+        }
+
+        // Add target order
+        totalVolume += targetOrder.amountInput;
+        weightedPriceSum += targetOrder.price * targetOrder.amountInput;
+
+        return totalVolume > 0 ? weightedPriceSum / totalVolume : targetOrder.price;
     }
 
     /**
@@ -472,7 +533,7 @@ class CowAVSOperator {
 
 
         } catch (error) {
-            console.error("❌ Failed to create task:", error);
+            console.error(" Failed to create task:", error);
         }
     }
 
@@ -481,7 +542,7 @@ class CowAVSOperator {
      */
     // Task validation disabled for simple testing
     private async handleNewTask(taskIndex: number, matchId: string): Promise<void> {
-        console.log(`🔍 Task validation disabled for simple testing: ${taskIndex}`);
+        console.log(` Task validation disabled for simple testing: ${taskIndex}`);
     }
 
     /**
@@ -489,25 +550,73 @@ class CowAVSOperator {
      */
     private async settleCowMatch(match: CowMatch): Promise<void> {
         try {
-            console.log(`⚖️  Settling CoW match...`);
+            console.log(`  Settling CoW match...`);
 
             // For testing: just log the settlement instead of calling contract
-            console.log(`   📊 Match Details:`);
+            console.log(`   Match Details:`);
             console.log(`      Buyer: ${match.buyOrder.trader.slice(0, 8)}...`);
             console.log(`      Seller: ${match.sellOrder.trader.slice(0, 8)}...`);
             console.log(`      Amount: ${formatEther(match.buyOrder.amountInput)} tokens`);
             console.log(`      Price: ${formatEther(match.executionPrice)} per token`);
 
-            // TODO: When contracts are deployed, uncomment this:
+            // TODO: When contracts are deployed
             // const tx = await this.privateCowContract.write.settleCowMatches([...]);
 
-            console.log(`   ✅ CoW match simulated: ${match.matchId}`);
+            console.log(`   CoW match simulated: ${match.matchId}`);
 
         } catch (error) {
-            console.error("❌ Failed to settle match:", error);
+            console.error(" Failed to settle match:", error);
         }
     }
 
+    /**
+     * Process order matches found by the matching algorithm
+     */
+    private async processOrderMatches(matches: OrderMatch[]): Promise<void> {
+        try {
+            console.log(` Processing ${matches.length} order matches...`);
+
+            for (const match of matches) {
+                console.log(`🎯 Found batch match:`);
+                console.log(`   Buy Orders: ${match.buyOrders.length} (${formatEther(match.totalBuyAmount)} total)`);
+                console.log(`   Sell Orders: ${match.sellOrders.length} (${formatEther(match.totalSellAmount)} total)`);
+                console.log(`   Clearing Price: ${formatEther(match.clearingPrice)}`);
+
+                // Remove matched orders from order books
+                this.removeMatchedOrders(match);
+
+                // TODO: Call settlement contract
+                // await this.settleOrderMatch(match);
+                console.log(`   ✅ Batch match simulated successfully`);
+            }
+
+        } catch (error) {
+            console.error(" Error processing order matches:", error);
+        }
+    }
+
+    /**
+     * Remove matched orders from the order books
+     */
+    private removeMatchedOrders(match: OrderMatch): void {
+        // Remove buy orders
+        for (const buyOrder of match.buyOrders) {
+            const index = this.buyOrders.findIndex(order => order.id === buyOrder.id);
+            if (index !== -1) {
+                this.buyOrders.splice(index, 1);
+            }
+        }
+
+        // Remove sell orders
+        for (const sellOrder of match.sellOrders) {
+            const index = this.sellOrders.findIndex(order => order.id === sellOrder.id);
+            if (index !== -1) {
+                this.sellOrders.splice(index, 1);
+            }
+        }
+
+        console.log(`   📊 Remaining orders: ${this.buyOrders.length} buy, ${this.sellOrders.length} sell`);
+    }
 
     /**
      * Get operator statistics
@@ -521,11 +630,13 @@ class CowAVSOperator {
                 address: this.account.address,
                 isValidOperator: isValid,
                 stake: formatEther(stake),
-                pendingOrders: this.pendingOrders.size,
+                buyOrders: this.buyOrders.length,
+                sellOrders: this.sellOrders.length,
+                totalOrders: this.buyOrders.length + this.sellOrders.length,
                 isRegistered: this.isOperatorRegistered
             };
         } catch (error) {
-            console.error("❌ Failed to get stats:", error);
+            console.error(" Failed to get stats:", error);
             return null;
         }
     }
@@ -543,14 +654,14 @@ async function main() {
     console.log("=============================\\n");
 
     // Configuration from environment
-    const PRIVATE_COW_ADDRESS = process.env.PRIVATE_COW_ADDRESS || "";
+    const PRIVATE_COW_ADDRESS = "0x487e08EF68dB8b274C92702861dbb9b086670888";
     const SERVICE_MANAGER_ADDRESS = process.env.SERVICE_MANAGER_ADDRESS || "";
     const TASK_MANAGER_ADDRESS = process.env.TASK_MANAGER_ADDRESS || "";
     const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || "";
     const RPC_URL = process.env.RPC_URL || "http://localhost:8545";
 
     if (!OPERATOR_PRIVATE_KEY) {
-        console.error("❌ Missing PRIVATE_KEY in environment");
+        console.error(" Missing PRIVATE_KEY in environment");
         process.exit(1);
     }
 
@@ -568,15 +679,15 @@ async function main() {
 
         // Print initial stats
         const stats = await operator.getStats();
-        console.log("\\n📊 Operator Stats:", stats);
+        console.log("\\n Operator Stats:", stats);
 
         // Keep the operator running
-        console.log("\\n🔄 CoW AVS Operator is now running...");
+        console.log("\\n CoW AVS Operator is now running...");
         console.log("   Press Ctrl+C to stop\\n");
 
         // Graceful shutdown handling
         process.on("SIGINT", async () => {
-            console.log("\\n🛑 Received shutdown signal...");
+            console.log("\\n Received shutdown signal...");
             await operator.shutdown();
             process.exit(0);
         });
@@ -593,7 +704,7 @@ async function main() {
         await new Promise(() => {});
 
     } catch (error) {
-        console.error("❌ Fatal error:", error);
+        console.error(" Fatal error:", error);
         process.exit(1);
     }
 }
@@ -601,7 +712,7 @@ async function main() {
 // Run if this file is executed directly
 if (require.main === module) {
     main().catch((error) => {
-        console.error("❌ Unhandled error:", error);
+        console.error("Unhandled error:", error);
         process.exit(1);
     });
 }

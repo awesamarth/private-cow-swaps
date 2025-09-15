@@ -1,0 +1,19 @@
+{
+  "name": "cow-testing-scripts",
+  "version": "1.0.0",
+  "description": "Testing scripts for CoW AVS",
+  "main": "test-cow-swaps.ts",
+  "scripts": {
+    "test-swaps": "ts-node test-cow-swaps-simple.ts",
+    "simple-swap": "ts-node simple-swap-test.ts",
+    "listen": "ts-node simple-swap-test.ts"
+  },
+  "dependencies": {
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

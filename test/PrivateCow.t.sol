@@ -37,10 +37,10 @@ contract CSMMTest is Test, Deployers {
         );
         deployCodeTo("PrivateCow.sol", abi.encode(manager), hookAddress);
         hook = CSMM(hookAddress);
+        console.log("ye dekh hook ka address: ", hookAddress);
 
         (key, ) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);
 
-        // Add some initial liquidity through the custom `addLiquidity` function
         IERC20Minimal(Currency.unwrap(key.currency0)).approve(
             hookAddress,
             1000 ether
@@ -78,9 +78,7 @@ contract CSMMTest is Test, Deployers {
     }
 
     function test_claimTokenBalances() public view {
-        // We add 1000 * (10^18) of liquidity of each token to the CSMM pool
-        // The actual tokens will move into the PM
-        // But the hook should get equivalent amount of claim tokens for each token
+
         uint256 token0ClaimID = CurrencyLibrary.toId(currency0);
 
         uint256 token0ClaimsBalance = manager.balanceOf(
