@@ -55,11 +55,32 @@ contract CSMMTest is Test, Deployers {
         deal(Currency.unwrap(currency1), bob, 1000 ether);
 
         vm.startPrank(alice);
-        IERC20Minimal(Currency.unwrap(currency0)).approve(address(hookAddress), 1000 ether);
-        IERC20Minimal(Currency.unwrap(currency0)).approve(address(manager), 1000 ether);
-        IERC20Minimal(Currency.unwrap(currency0)).approve(address(swapRouter), 1000 ether);
+        IERC20Minimal(Currency.unwrap(currency0)).approve(
+            address(hookAddress),
+            1000 ether
+        );
+        IERC20Minimal(Currency.unwrap(currency0)).approve(
+            address(manager),
+            1000 ether
+        );
+        IERC20Minimal(Currency.unwrap(currency0)).approve(
+            address(swapRouter),
+            1000 ether
+        );
+        IERC20Minimal(Currency.unwrap(currency1)).approve(
+            address(hookAddress),
+            1000 ether
+        );
+        IERC20Minimal(Currency.unwrap(currency1)).approve(
+            address(manager),
+            1000 ether
+        );
+        IERC20Minimal(Currency.unwrap(currency1)).approve(
+            address(swapRouter),
+            1000 ether
+        );
         vm.stopPrank();
-        
+
         hook.addLiquidity(key, 1000e18);
     }
 
@@ -78,7 +99,6 @@ contract CSMMTest is Test, Deployers {
     }
 
     function test_claimTokenBalances() public view {
-
         uint256 token0ClaimID = CurrencyLibrary.toId(currency0);
 
         uint256 token0ClaimsBalance = manager.balanceOf(
@@ -86,7 +106,6 @@ contract CSMMTest is Test, Deployers {
             token0ClaimID
         );
         console.log("token 0 claim balance: ", token0ClaimsBalance);
-
 
         assertEq(token0ClaimsBalance, 1000 ether);
     }
@@ -115,9 +134,44 @@ contract CSMMTest is Test, Deployers {
         console.log(currency0.balanceOf(alice));
         uint256 token0ClaimID = CurrencyLibrary.toId(currency0);
 
-        uint256 token0ClaimsBalance = manager.balanceOf(address(hook), token0ClaimID);
+        uint256 token0ClaimsBalance = manager.balanceOf(
+            address(hook),
+            token0ClaimID
+        );
         console.log("token 0 claim balance of alice is: ", token0ClaimsBalance);
 
         assertEq(balanceOfTokenABefore - balanceOfTokenAAfter, 100e18);
+    }
+
+    function test_swap_exactInput_OneForZero() public {
+        PoolSwapTest.TestSettings memory settings = PoolSwapTest.TestSettings({
+            takeClaims: false,
+            settleUsingBurn: false
+        });
+
+        uint256 balanceOfTokenBBefore = key.currency1.balanceOf(alice);
+
+        vm.prank(alice);
+        swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: false,
+                amountSpecified: -100e18,
+                sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+            }),
+            settings,
+            abi.encode(10342340)
+        );
+        uint256 balanceOfTokenBAfter = key.currency1.balanceOf(alice);
+        console.log(currency1.balanceOf(alice));
+        uint256 token1ClaimID = CurrencyLibrary.toId(currency1);
+
+        uint256 token1ClaimsBalance = manager.balanceOf(
+            address(hook),
+            token1ClaimID
+        );
+        console.log("token 1 claim balance of alice is: ", token1ClaimsBalance);
+
+        assertEq(balanceOfTokenBBefore - balanceOfTokenBAfter, 100e18);
     }
 }

@@ -52,6 +52,7 @@ class CowAVSOperator {
     // Separate order books for buy (zeroForOne=true) and sell (zeroForOne=false)
     private buyOrders: CowOrder[] = [];  // zeroForOne = true
     private sellOrders: CowOrder[] = []; // zeroForOne = false
+    private pendingMatches: Map<string, OrderMatch> = new Map(); // Store matches awaiting consensus
     private isOperatorRegistered: boolean = false;
 
     constructor(
@@ -300,8 +301,8 @@ class CowAVSOperator {
                     const { id: poolId, sender, amountInput, amountWanted, zeroForOne } = log.args;
                     console.log(` New order detected:`);
                     console.log(`   Trader: ${sender!.slice(0, 8)}...`);
-                    console.log(`   Amount In: ${formatEther(BigInt(amountInput!))}`);
-                    console.log(`   Amount Wanted: ${formatEther(amountWanted!)}`);
+                    console.log(`   Amount In: ${formatEther(BigInt(amountInput!))} tokens`);
+                    console.log(`   Amount Wanted: ${formatEther(amountWanted!)} tokens`);
                     console.log(`   Direction: ${zeroForOne ? "0→1" : "1→0"}`);
 
                     await this.handleNewOrder(poolId!, sender!, BigInt(amountInput!), amountWanted!, zeroForOne!);
@@ -370,7 +371,10 @@ class CowAVSOperator {
         const orderId = `${trader}-${poolId}-${Date.now()}`;
 
         // Calculate price for sorting (amountWanted per amountInput)
-        const price = (amountWanted * BigInt(10000)) / amountInput; // Scaled for precision
+        // Prevent division by zero and handle edge cases
+        const price = amountInput > 0 ? (amountWanted * BigInt(10000)) / amountInput : BigInt(0);
+
+        console.log(`   📊 Order created: ${formatEther(amountInput)} → ${formatEther(amountWanted)} (price: ${price})`);
 
         const order: CowOrder = {
             id: orderId,
@@ -398,9 +402,29 @@ class CowAVSOperator {
         }
 
         // Look for matches using improved algorithm
+        console.log(`🔍 Checking for matches...`);
+        console.log(`   Buy orders: ${this.buyOrders.length}, Sell orders: ${this.sellOrders.length}`);
+        console.log(`   Buy order amounts: ${this.buyOrders.map(o => formatEther(o.amountInput))}`);
+        console.log(`   Sell order amounts: ${this.sellOrders.map(o => formatEther(o.amountInput))}`);
+        console.log(`   Buy order prices: ${this.buyOrders.map(o => o.price.toString())}`);
+        console.log(`   Sell order prices: ${this.sellOrders.map(o => o.price.toString())}`);
+
         const matches = this.findOrderMatches();
         if (matches.length > 0) {
-            await this.processOrderMatches(matches);
+            console.log(`🎯 Found ${matches.length} matches!`);
+            await this.createMatchingTask(matches);
+        } else {
+            console.log(`❌ No matches found`);
+            // Debug why no matches
+            if (this.buyOrders.length > 0 && this.sellOrders.length > 0) {
+                console.log(`   🔍 Debug: Checking cross compatibility...`);
+                for (const buyOrder of this.buyOrders) {
+                    for (const sellOrder of this.sellOrders) {
+                        const canCross = this.canOrdersCross(buyOrder, sellOrder);
+                        console.log(`      Buy ${formatEther(buyOrder.amountInput)} @ ${buyOrder.price} vs Sell ${formatEther(sellOrder.amountInput)} @ ${sellOrder.price} = ${canCross}`);
+                    }
+                }
+            }
         }
     }
 
@@ -416,7 +440,7 @@ class CowAVSOperator {
 
         // Strategy: Start with largest order and try to fill it with multiple counter-orders
         // Try to match buy orders against sell orders
-        const largeBuyOrders = this.buyOrders.filter(order => order.amountInput >= parseEther("10")); // Orders > 10 tokens
+        const largeBuyOrders = this.buyOrders.filter(order => order.amountInput >= parseEther("1")); // Orders > 1 token
         for (const buyOrder of largeBuyOrders) {
             const match = this.findMatchingOrders(buyOrder, this.sellOrders, true);
             if (match && match.sellOrders.length > 0) {
@@ -425,7 +449,7 @@ class CowAVSOperator {
         }
 
         // Try to match sell orders against buy orders
-        const largeSellOrders = this.sellOrders.filter(order => order.amountInput >= parseEther("10"));
+        const largeSellOrders = this.sellOrders.filter(order => order.amountInput >= parseEther("1"));
         for (const sellOrder of largeSellOrders) {
             const match = this.findMatchingOrders(sellOrder, this.buyOrders, false);
             if (match && match.buyOrders.length > 0) {
@@ -487,9 +511,16 @@ class CowAVSOperator {
         // Buy order price should be >= sell order price for crossing
         // Buy price: how much they'll pay per unit
         // Sell price: how much they want per unit
+        const sameTrader = buyOrder.trader === sellOrder.trader;
+        const samePool = buyOrder.poolId === sellOrder.poolId;
+        const priceCompatible = buyOrder.price >= sellOrder.price;
+
+        console.log(`      Cross check: sameTrader=${sameTrader}, samePool=${samePool}, priceOk=${priceCompatible} (${buyOrder.price} >= ${sellOrder.price})`);
+
         return (
-            buyOrder.trader !== sellOrder.trader &&
-            buyOrder.price >= sellOrder.price // Buy price >= sell price
+            !sameTrader &&
+            samePool &&
+            priceCompatible
         );
     }
 
@@ -519,18 +550,41 @@ class CowAVSOperator {
     /**
      * Create a task for match validation
      */
-    private async createMatchingTask(matches: CowMatch[]): Promise<void> {
+    private async createMatchingTask(matches: OrderMatch[]): Promise<void> {
         try {
             console.log(`📦 Creating AVS task for ${matches.length} matches...`);
 
             const match = matches[0]; // Handle one match for simplicity
-            
-            // For now, skip task creation and settle directly
-            console.log(`   📦 Found match ${match.matchId}, settling directly...`);
 
-            // Directly settle the match for testing
-            await this.settleCowMatch(match);
+            // Create match hash for validation
+            const matchData = JSON.stringify({
+                buyOrders: match.buyOrders.map(o => ({ trader: o.trader, amount: o.amountInput.toString() })),
+                sellOrders: match.sellOrders.map(o => ({ trader: o.trader, amount: o.amountInput.toString() })),
+                timestamp: match.timestamp
+            });
+            const matchHash = toHex(matchData).slice(0, 66); // Convert to bytes32
 
+            console.log(`   Creating task for match ${matchHash.slice(0, 10)}...`);
+
+            // Create task with 60% quorum threshold
+            const tx = await this.taskManager.write.createNewTask([
+                matchHash as Hash,
+                60, // 60% quorum
+                "0x01" // Mock quorum numbers
+            ], {
+                value: parseEther("0.0001") // Task reward
+            });
+
+            await this.publicClient.waitForTransactionReceipt({ hash: tx });
+            console.log(`   ✅ Validation task created for match ${matchHash.slice(0, 10)}...`);
+
+            // Store match for later settlement
+            this.pendingMatches.set(matchHash, match);
+
+            // Wait for consensus, then settle
+            setTimeout(() => {
+                this.checkConsensusAndSettle(matchHash);
+            }, 15000); // 15 second delay for consensus
 
         } catch (error) {
             console.error(" Failed to create task:", error);
@@ -540,29 +594,62 @@ class CowAVSOperator {
     /**
      * Handle validation of tasks created by other operators
      */
-    // Task validation disabled for simple testing
-    private async handleNewTask(taskIndex: number, matchId: string): Promise<void> {
-        console.log(` Task validation disabled for simple testing: ${taskIndex}`);
+    private async handleNewTask(taskIndex: number, matchHash: string): Promise<void> {
+        try {
+            // Skip tasks we created ourselves
+            if (await this.isOurTask(taskIndex)) {
+                console.log(`   Skipping our own task ${taskIndex}`);
+                return;
+            }
+
+            console.log(`   Validating task ${taskIndex}...`);
+
+            // Perform validation - check if match is still valid
+            const validationResult = await this.validateMatch(matchHash);
+
+            // Create response hash
+            const responseData = JSON.stringify({ valid: validationResult, taskIndex });
+            const response = toHex(responseData).slice(0, 66); // Convert to bytes32
+
+            // Sign the response (simplified - should use EIP-191)
+            const signature = await this.walletClient.signMessage({
+                account: this.account,
+                message: response
+            });
+
+            // Submit response to TaskManager
+            const tx = await this.taskManager.write.respondToTask([
+                matchHash as Hash,
+                response as Hash,
+                signature
+            ]);
+
+            await this.publicClient.waitForTransactionReceipt({ hash: tx });
+            console.log(`   ✅ Submitted validation response for task ${taskIndex}`);
+
+        } catch (error) {
+            console.error(` Error handling task ${taskIndex}:`, error);
+        }
     }
 
     /**
      * Settle a CoW match by calling PRIVATE_COW contract
      */
-    private async settleCowMatch(match: CowMatch): Promise<void> {
+    private async settleCowMatch(match: OrderMatch): Promise<void> {
         try {
             console.log(`  Settling CoW match...`);
 
             // For testing: just log the settlement instead of calling contract
             console.log(`   Match Details:`);
-            console.log(`      Buyer: ${match.buyOrder.trader.slice(0, 8)}...`);
-            console.log(`      Seller: ${match.sellOrder.trader.slice(0, 8)}...`);
-            console.log(`      Amount: ${formatEther(match.buyOrder.amountInput)} tokens`);
-            console.log(`      Price: ${formatEther(match.executionPrice)} per token`);
+            console.log(`      Buy Orders: ${match.buyOrders.length}`);
+            console.log(`      Sell Orders: ${match.sellOrders.length}`);
+            console.log(`      Total Amount: ${formatEther(match.totalBuyAmount)} tokens`);
+            console.log(`      Clearing Price: ${formatEther(match.clearingPrice)} per token`);
 
             // TODO: When contracts are deployed
             // const tx = await this.privateCowContract.write.settleCowMatches([...]);
 
-            console.log(`   CoW match simulated: ${match.matchId}`);
+            console.log(`   CoW match simulated: ${match.timestamp}`);
 
         } catch (error) {
             console.error(" Failed to settle match:", error);
@@ -642,6 +729,53 @@ class CowAVSOperator {
     }
 
     /**
+     * Check if task was created by this operator
+     */
+    private async isOurTask(taskIndex: number): Promise<boolean> {
+        // Simple heuristic - check if task was created recently by us
+        // In production, would track task creation more precisely
+        return false; // For now, validate all tasks
+    }
+
+    /**
+     * Validate a match hash
+     */
+    private async validateMatch(matchHash: string): Promise<boolean> {
+        try {
+            // Basic validation - check if orders still exist and can cross
+            // In production, would perform deeper validation
+            console.log(`     Validating match ${matchHash.slice(0, 10)}...`);
+            return true; // Simplified validation
+        } catch (error) {
+            console.error(`     Validation failed:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Check consensus and settle match if achieved
+     */
+    private async checkConsensusAndSettle(matchHash: string): Promise<void> {
+        try {
+            const match = this.pendingMatches.get(matchHash);
+            if (!match) {
+                console.log(`   Match ${matchHash.slice(0, 10)} not found for settlement`);
+                return;
+            }
+
+            // In production, would check TaskManager.hasConsensus()
+            // For now, assume consensus achieved
+            console.log(`   Consensus achieved for match ${matchHash.slice(0, 10)}, settling...`);
+
+            await this.settleCowMatch(match);
+            this.pendingMatches.delete(matchHash);
+
+        } catch (error) {
+            console.error(`   Failed to settle match ${matchHash.slice(0, 10)}:`, error);
+        }
+    }
+
+    /**
      * Graceful shutdown
      */
     async shutdown(): Promise<void> {
@@ -654,7 +788,7 @@ async function main() {
     console.log("=============================\\n");
 
     // Configuration from environment
-    const PRIVATE_COW_ADDRESS = "0x487e08EF68dB8b274C92702861dbb9b086670888";
+    const PRIVATE_COW_ADDRESS = "0xce932F8B0C471Cf12a62257b26223Feff2aBC888";
     const SERVICE_MANAGER_ADDRESS = process.env.SERVICE_MANAGER_ADDRESS || "";
     const TASK_MANAGER_ADDRESS = process.env.TASK_MANAGER_ADDRESS || "";
     const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || "";
@@ -696,7 +830,7 @@ async function main() {
         setInterval(async () => {
             const stats = await operator.getStats();
             console.log(
-                `💡 Status: ${stats?.pendingOrders || 0} pending orders, Stake: ${stats?.stake || 0} ETH`
+                `💡 Status: ${stats?.totalOrders || 0} pending orders, Stake: ${stats?.stake || 0} ETH`
             );
         }, 30000);
 
