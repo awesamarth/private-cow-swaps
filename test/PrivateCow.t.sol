@@ -37,7 +37,9 @@ contract CSMMTest is Test, Deployers {
         );
         deployCodeTo("PrivateCow.sol", abi.encode(manager), hookAddress);
         hook = CSMM(hookAddress);
-        console.log("ye dekh hook ka address: ", hookAddress);
+        console.log("hook address: ", hookAddress);
+        console.log("alice address ", alice);
+
 
         (key, ) = initPool(currency0, currency1, hook, 3000, SQRT_PRICE_1_1);
 
@@ -128,7 +130,7 @@ contract CSMMTest is Test, Deployers {
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
             settings,
-            abi.encode(10342340)
+            abi.encode(alice)
         );
         uint256 balanceOfTokenAAfter = key.currency0.balanceOf(alice);
         console.log(currency0.balanceOf(alice));

@@ -30,7 +30,7 @@ contract PrivateCow is BaseHook {
         bytes32 indexed id,
         address indexed sender,
         int128 amountInput,
-        uint256 amountWanted,
+        address trader,
         bool zeroForOne
     );
 
@@ -116,11 +116,11 @@ contract PrivateCow is BaseHook {
 
     function _postBeforeSwap(address sender, PoolKey calldata key, int128 absInputAmount, bool zeroForOne, bytes calldata hookData) internal {
     if (hookData.length > 0) {
-        uint256 amountWanted = abi.decode(hookData, (uint256));
-        console.log("amount", amountWanted);
+        address addressOfSender = abi.decode(hookData, (address));
+        console.log("address of trader", addressOfSender);
 
 
-    emit HookSwap(PoolId.unwrap(key.toId()), sender, -absInputAmount, amountWanted, zeroForOne);
+    emit HookSwap(PoolId.unwrap(key.toId()), sender, -absInputAmount, addressOfSender, zeroForOne);
 
     }
 
@@ -177,17 +177,16 @@ contract PrivateCow is BaseHook {
     }
 
     function settleCowMatches(
-        bytes32[] calldata matchHashes,
         address[] calldata buyers,
         address[] calldata sellers,
-        uint256[] calldata amounts,
-        Currency[] calldata currencies
+        uint256[] calldata sellerAmounts,
+        uint256 [] calldata buyerAmounts
     ) external onlyOperator {
         require(
-            matchHashes.length == buyers.length &&
             buyers.length == sellers.length &&
-            sellers.length == amounts.length &&
-            amounts.length == currencies.length,
+            sellers.length == sellerAmounts.length&&
+            buyers.length == buyerAmounts.length,
+
             "Array length mismatch"
         );
 

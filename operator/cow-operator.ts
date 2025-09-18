@@ -34,7 +34,7 @@ interface OrderMatch {
     sellOrders: CowOrder[]; // Can be multiple small orders
     totalBuyAmount: bigint;
     totalSellAmount: bigint;
-    clearingPrice: bigint;
+    matchedAmount: bigint;  // Amount that can actually be matched (min of buy/sell)
     timestamp: number;
 }
 
@@ -87,7 +87,7 @@ class CowAVSOperator {
                     { name: 'id', type: 'bytes32', indexed: true },
                     { name: 'sender', type: 'address', indexed: true },
                     { name: 'amountInput', type: 'int128' },
-                    { name: 'amountWanted', type: 'uint256' },
+                    { name: 'trader', type: 'address' },
                     { name: 'zeroForOne', type: 'bool' }
                 ]
             },
@@ -292,20 +292,20 @@ class CowAVSOperator {
                     { name: 'id', type: 'bytes32', indexed: true },
                     { name: 'sender', type: 'address', indexed: true },
                     { name: 'amountInput', type: 'int128' },
-                    { name: 'amountWanted', type: 'uint256' },
+                    { name: 'trader', type: 'address' },
                     { name: 'zeroForOne', type: 'bool' }
                 ]
             },
             onLogs: async (logs) => {
                 for (const log of logs) {
-                    const { id: poolId, sender, amountInput, amountWanted, zeroForOne } = log.args;
+                    const { id: poolId, sender, amountInput, trader, zeroForOne } = log.args;
                     console.log(` New order detected:`);
-                    console.log(`   Trader: ${sender!.slice(0, 8)}...`);
+                    console.log(`   Trader: ${trader!.slice(0, 8)}...`);
+                    console.log(`   Router: ${sender!.slice(0, 8)}...`);
                     console.log(`   Amount In: ${formatEther(BigInt(amountInput!))} tokens`);
-                    console.log(`   Amount Wanted: ${formatEther(amountWanted!)} tokens`);
                     console.log(`   Direction: ${zeroForOne ? "0→1" : "1→0"}`);
 
-                    await this.handleNewOrder(poolId!, sender!, BigInt(amountInput!), amountWanted!, zeroForOne!);
+                    await this.handleNewOrder(poolId!, trader!, BigInt(amountInput!), BigInt(0), zeroForOne!);
                 }
             }
         });
@@ -370,11 +370,10 @@ class CowAVSOperator {
     ): Promise<void> {
         const orderId = `${trader}-${poolId}-${Date.now()}`;
 
-        // Calculate price for sorting (amountWanted per amountInput)
-        // Prevent division by zero and handle edge cases
-        const price = amountInput > 0 ? (amountWanted * BigInt(10000)) / amountInput : BigInt(0);
+        // For 1:1 trading, no complex price needed - just use input amount as reference
+        const price = amountInput; // Simple approach for 1:1 pools
 
-        console.log(`   📊 Order created: ${formatEther(amountInput)} → ${formatEther(amountWanted)} (price: ${price})`);
+        console.log(`   📊 Order created: ${formatEther(amountInput)} tokens (1:1 swap)`);
 
         const order: CowOrder = {
             id: orderId,
@@ -405,9 +404,9 @@ class CowAVSOperator {
         console.log(`🔍 Checking for matches...`);
         console.log(`   Buy orders: ${this.buyOrders.length}, Sell orders: ${this.sellOrders.length}`);
         console.log(`   Buy order amounts: ${this.buyOrders.map(o => formatEther(o.amountInput))}`);
+        console.log(`   Buy order traders: ${this.buyOrders.map(o => o.trader.slice(0,8))}`);
         console.log(`   Sell order amounts: ${this.sellOrders.map(o => formatEther(o.amountInput))}`);
-        console.log(`   Buy order prices: ${this.buyOrders.map(o => o.price.toString())}`);
-        console.log(`   Sell order prices: ${this.sellOrders.map(o => o.price.toString())}`);
+        console.log(`   Sell order traders: ${this.sellOrders.map(o => o.trader.slice(0,8))}`);
 
         const matches = this.findOrderMatches();
         if (matches.length > 0) {
@@ -421,7 +420,7 @@ class CowAVSOperator {
                 for (const buyOrder of this.buyOrders) {
                     for (const sellOrder of this.sellOrders) {
                         const canCross = this.canOrdersCross(buyOrder, sellOrder);
-                        console.log(`      Buy ${formatEther(buyOrder.amountInput)} @ ${buyOrder.price} vs Sell ${formatEther(sellOrder.amountInput)} @ ${sellOrder.price} = ${canCross}`);
+                        console.log(`      Buy ${formatEther(buyOrder.amountInput)} (${buyOrder.trader.slice(0,8)}) vs Sell ${formatEther(sellOrder.amountInput)} (${sellOrder.trader.slice(0,8)}) = ${canCross}`);
                     }
                 }
             }
@@ -429,7 +428,7 @@ class CowAVSOperator {
     }
 
     /**
-     * Find order matches using improved batch clearing algorithm
+     * Find order matches using batch aggregation (restored smart algorithm)
      */
     private findOrderMatches(): OrderMatch[] {
         const matches: OrderMatch[] = [];
@@ -461,14 +460,14 @@ class CowAVSOperator {
     }
 
     /**
-     * Find orders that can match against a target order
+     * Find orders that can match against a target order 
      */
     private findMatchingOrders(targetOrder: CowOrder, counterOrders: CowOrder[], targetIsBuy: boolean): OrderMatch | null {
         const matchingOrders: CowOrder[] = [];
         let totalMatchedAmount = BigInt(0);
         let targetAmount = targetOrder.amountInput;
 
-        // Filter compatible orders (same pool, can cross)
+        // Filter compatible orders (same pool, different traders, opposite directions)
         const compatibleOrders = counterOrders.filter(order =>
             order.poolId === targetOrder.poolId &&
             this.canOrdersCross(targetOrder, order)
@@ -489,14 +488,14 @@ class CowAVSOperator {
 
         // Only create match if we can fill significant portion (>50%) of target order
         if (totalMatchedAmount >= (targetAmount * BigInt(50)) / BigInt(100)) {
-            const clearingPrice = this.calculateClearingPrice(targetOrder, matchingOrders);
-
+            const matchedAmount = totalMatchedAmount < targetAmount ? totalMatchedAmount : targetAmount;
+            
             return {
                 buyOrders: targetIsBuy ? [targetOrder] : matchingOrders,
                 sellOrders: targetIsBuy ? matchingOrders : [targetOrder],
                 totalBuyAmount: targetIsBuy ? targetOrder.amountInput : totalMatchedAmount,
                 totalSellAmount: targetIsBuy ? totalMatchedAmount : targetOrder.amountInput,
-                clearingPrice,
+                matchedAmount,
                 timestamp: Date.now()
             };
         }
@@ -505,47 +504,22 @@ class CowAVSOperator {
     }
 
     /**
-     * Check if two orders can cross (have compatible prices)
+     * Check if two orders can cross (simplified for 1:1 swaps)
      */
     private canOrdersCross(buyOrder: CowOrder, sellOrder: CowOrder): boolean {
-        // Buy order price should be >= sell order price for crossing
-        // Buy price: how much they'll pay per unit
-        // Sell price: how much they want per unit
         const sameTrader = buyOrder.trader === sellOrder.trader;
         const samePool = buyOrder.poolId === sellOrder.poolId;
-        const priceCompatible = buyOrder.price >= sellOrder.price;
+        const oppositeDirections = buyOrder.zeroForOne !== sellOrder.zeroForOne;
 
-        console.log(`      Cross check: sameTrader=${sameTrader}, samePool=${samePool}, priceOk=${priceCompatible} (${buyOrder.price} >= ${sellOrder.price})`);
+        console.log(`      Cross check: sameTrader=${sameTrader}, samePool=${samePool}, oppositeDirections=${oppositeDirections}`);
 
         return (
             !sameTrader &&
             samePool &&
-            priceCompatible
+            oppositeDirections  // One wants 0→1, other wants 1→0
         );
     }
 
-    /**
-     * Calculate clearing price for a batch of orders
-     */
-    private calculateClearingPrice(targetOrder: CowOrder, matchingOrders: CowOrder[]): bigint {
-        if (matchingOrders.length === 0) return targetOrder.price;
-
-        // Use volume-weighted average price
-        let totalVolume = BigInt(0);
-        let weightedPriceSum = BigInt(0);
-
-        for (const order of matchingOrders) {
-            const volume = order.amountInput;
-            totalVolume += volume;
-            weightedPriceSum += order.price * volume;
-        }
-
-        // Add target order
-        totalVolume += targetOrder.amountInput;
-        weightedPriceSum += targetOrder.price * targetOrder.amountInput;
-
-        return totalVolume > 0 ? weightedPriceSum / totalVolume : targetOrder.price;
-    }
 
     /**
      * Create a task for match validation
@@ -644,7 +618,6 @@ class CowAVSOperator {
             console.log(`      Buy Orders: ${match.buyOrders.length}`);
             console.log(`      Sell Orders: ${match.sellOrders.length}`);
             console.log(`      Total Amount: ${formatEther(match.totalBuyAmount)} tokens`);
-            console.log(`      Clearing Price: ${formatEther(match.clearingPrice)} per token`);
 
             // TODO: When contracts are deployed
             // const tx = await this.privateCowContract.write.settleCowMatches([...]);
@@ -664,17 +637,17 @@ class CowAVSOperator {
             console.log(` Processing ${matches.length} order matches...`);
 
             for (const match of matches) {
-                console.log(`🎯 Found batch match:`);
-                console.log(`   Buy Orders: ${match.buyOrders.length} (${formatEther(match.totalBuyAmount)} total)`);
-                console.log(`   Sell Orders: ${match.sellOrders.length} (${formatEther(match.totalSellAmount)} total)`);
-                console.log(`   Clearing Price: ${formatEther(match.clearingPrice)}`);
+                console.log(`🎯 Found 1:1 match:`);
+                console.log(`   Buy Order: ${formatEther(match.totalBuyAmount)} tokens (${match.buyOrders[0].trader.slice(0,8)}...)`);
+                console.log(`   Sell Order: ${formatEther(match.totalSellAmount)} tokens (${match.sellOrders[0].trader.slice(0,8)}...)`);
+                console.log(`   Matched Amount: ${formatEther(match.matchedAmount)} tokens`);
 
                 // Remove matched orders from order books
                 this.removeMatchedOrders(match);
 
                 // TODO: Call settlement contract
                 // await this.settleOrderMatch(match);
-                console.log(`   ✅ Batch match simulated successfully`);
+                console.log(`   ✅ 1:1 match simulated successfully`);
             }
 
         } catch (error) {
@@ -788,7 +761,7 @@ async function main() {
     console.log("=============================\\n");
 
     // Configuration from environment
-    const PRIVATE_COW_ADDRESS = "0xce932F8B0C471Cf12a62257b26223Feff2aBC888";
+    const PRIVATE_COW_ADDRESS = "0x11cAE71f4e583D9eA40c10ffD9023bd576d30888";
     const SERVICE_MANAGER_ADDRESS = process.env.SERVICE_MANAGER_ADDRESS || "";
     const TASK_MANAGER_ADDRESS = process.env.TASK_MANAGER_ADDRESS || "";
     const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || "";

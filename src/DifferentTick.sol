@@ -20,13 +20,13 @@ import {console} from "forge-std/console.sol";
 // In practice, we don't usually see this in prod since depegs can happen and we dont want exact equal amounts
 // But is a nice little NoOp hook example
 
-contract FAFO is BaseHook {
+contract PrivateCow is BaseHook {
     using CurrencySettler for Currency;
 
     error AddLiquidityThroughHook();
 
     // router of the swap
-    event HookSwap( // v4 pool id
+    event HookSwap(
         bytes32 indexed id,
         address indexed sender,
         int128 amountInput,
@@ -45,7 +45,6 @@ contract FAFO is BaseHook {
         address sender;
     }
 
-    // AVS operator management
     mapping(address => bool) public operators;
     mapping(address => uint256) public operatorStake;
 
@@ -102,12 +101,6 @@ contract FAFO is BaseHook {
         );
         callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
-        // Since we didn't go through the regular "modify liquidity" flow,
-        // the PM just has a debit of `amountEach` of each currency from us
-        // We can, in exchange, get back ERC-6909 claim tokens for `amountEach` of each currency
-        // to create a credit of `amountEach` of each currency to us
-        // that balances out the debit
-
         // We will store those claim tokens with the hook, so when swaps take place
         // liquidity from our CSMM can be used by minting/burning claim tokens the hook owns
         callbackData.currency0.take(
@@ -116,7 +109,7 @@ contract FAFO is BaseHook {
             callbackData.amountEach,
             true // true = mint claim tokens for the hook, equivalent to money we just deposited to the PM
         );
-        callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
+        callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, true);
 
         return "";
     }
@@ -145,11 +138,6 @@ contract FAFO is BaseHook {
         if ( params.amountSpecified < 0) {
             absInputAmount = int128(-params.amountSpecified);
 
-            // If you wanted to charge fees here, reduce absOutputAmount a little bit
-            // i.e. if user is giving you 100 A, "spot price" would have them get back 100 B.
-            // Instead, if you give back 99B - that's effectively a 1% fee
-            // absOutputAmount = (absOutputAmount * 99) / 100;
-
             beforeSwapDelta = toBeforeSwapDelta(
                 absInputAmount, // abs(params.amountSpecified) of input token owed from uniswap to hook
                 0 
@@ -165,7 +153,10 @@ contract FAFO is BaseHook {
 
         _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         } else {
-            revert();
+            // Sell order: token1 -> token0
+        key.currency1.take(poolManager, address(this), uint256(uint128(absInputAmount)), false);
+
+        _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         }
 
         return (this.beforeSwap.selector, beforeSwapDelta, 0);

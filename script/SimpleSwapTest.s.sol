@@ -19,7 +19,7 @@ contract SimpleSwapTest is Script {
     using CurrencyLibrary for Currency;
 
     // Use deployed addresses
-    address constant HOOK_ADDRESS = 0xce932F8B0C471Cf12a62257b26223Feff2aBC888;
+    address constant HOOK_ADDRESS = 0x11cAE71f4e583D9eA40c10ffD9023bd576d30888;
     address constant POOL_MANAGER = 0x5FbDB2315678afecb367f032d93F642f64180aa3;
 
     function run() external {
@@ -87,7 +87,7 @@ contract SimpleSwapTest is Script {
                 takeClaims: false,
                 settleUsingBurn: false
             }),
-            abi.encode(uint256(12345)) // hookData
+            abi.encode(msg.sender) // Pass trader address
         );
 
         console.log(" Single order created!");

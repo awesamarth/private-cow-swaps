@@ -19,7 +19,7 @@ contract TestBatchMatching is Script {
     using CurrencyLibrary for Currency;
 
     // Use deployed addresses
-    address constant HOOK_ADDRESS = 0xce932F8B0C471Cf12a62257b26223Feff2aBC888;
+    address constant HOOK_ADDRESS = 0x11cAE71f4e583D9eA40c10ffD9023bd576d30888;
     address constant POOL_MANAGER = 0x5FbDB2315678afecb367f032d93F642f64180aa3;
 
     function run() external {
@@ -101,7 +101,7 @@ contract TestBatchMatching is Script {
                 takeClaims: false,
                 settleUsingBurn: false
             }),
-            abi.encode(uint256(60 ether)) // Want 60 token1
+            abi.encode(buyer) // Pass buyer address
         );
 
         console.log("    Large buy order submitted by BUYER");
@@ -132,7 +132,7 @@ contract TestBatchMatching is Script {
                 takeClaims: false,
                 settleUsingBurn: false
             }),
-            abi.encode(uint256(15 ether))
+            abi.encode(seller)
         );
 
         console.log("    First sell order submitted by SELLER");
@@ -151,7 +151,7 @@ contract TestBatchMatching is Script {
                 takeClaims: false,
                 settleUsingBurn: false
             }),
-            abi.encode(uint256(15 ether))
+            abi.encode(seller)
         );
 
         console.log("    Second sell order submitted by SELLER");
@@ -170,7 +170,7 @@ contract TestBatchMatching is Script {
                 takeClaims: false,
                 settleUsingBurn: false
             }),
-            abi.encode(uint256(20 ether))
+            abi.encode(seller)
         );
 
         console.log("    Third sell order submitted by SELLER");

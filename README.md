@@ -8,11 +8,12 @@ deploy avs via script
 
 
 check if hook  contract deployed
-cast code 0xce932F8B0C471Cf12a62257b26223Feff2aBC888  --rpc-url http://localhost:8545
+cast code 0x11cAE71f4e583D9eA40c10ffD9023bd576d30888  --rpc-url http://localhost:8545
 
 run operator 
     cd operator
     pnpm start
 
 run test script simpleswaptest.s.sol
+    
 run test script testbatchmatching.s.sol
