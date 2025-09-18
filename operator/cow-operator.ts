@@ -24,6 +24,13 @@ interface CowOrder {
     amountWanted: bigint;
     zeroForOne: boolean;
     poolId: Hash;
+    poolKey: {
+        currency0: Address;
+        currency1: Address;
+        fee: number;
+        tickSpacing: number;
+        hooks: Address;
+    };
     timestamp: number;
     blockNumber: bigint;
     price: bigint; // Price as amountWanted/amountInput for sorting
@@ -54,6 +61,9 @@ class CowAVSOperator {
     private sellOrders: CowOrder[] = []; // zeroForOne = false
     private pendingMatches: Map<string, OrderMatch> = new Map(); // Store matches awaiting consensus
     private isOperatorRegistered: boolean = false;
+
+    // Bypass flag for development - can toggle between direct settlement and full AVS consensus
+    private readonly BYPASS_AVS_CONSENSUS: boolean = true;
 
     constructor(
         privateCowAddress: Address,
@@ -88,18 +98,29 @@ class CowAVSOperator {
                     { name: 'sender', type: 'address', indexed: true },
                     { name: 'amountInput', type: 'int128' },
                     { name: 'trader', type: 'address' },
-                    { name: 'zeroForOne', type: 'bool' }
+                    { name: 'zeroForOne', type: 'bool' },
+                    { name: 'currency0', type: 'address' },
+                    { name: 'currency1', type: 'address' },
+                    { name: 'fee', type: 'uint24' },
+                    { name: 'tickSpacing', type: 'int24' },
+                    { name: 'hooks', type: 'address' }
                 ]
             },
             {
                 type: 'function',
                 name: 'settleCowMatches',
                 inputs: [
-                    { name: 'matchHashes', type: 'bytes32[]' },
+                    { name: 'key', type: 'tuple', components: [
+                        { name: 'currency0', type: 'address' },
+                        { name: 'currency1', type: 'address' },
+                        { name: 'fee', type: 'uint24' },
+                        { name: 'tickSpacing', type: 'int24' },
+                        { name: 'hooks', type: 'address' }
+                    ]},
                     { name: 'buyers', type: 'address[]' },
                     { name: 'sellers', type: 'address[]' },
-                    { name: 'amounts', type: 'uint256[]' },
-                    { name: 'currencies', type: 'address[]' }
+                    { name: 'buyerAmounts', type: 'uint256[]' },
+                    { name: 'sellerAmounts', type: 'uint256[]' }
                 ],
                 outputs: [],
                 stateMutability: 'nonpayable'
@@ -293,19 +314,31 @@ class CowAVSOperator {
                     { name: 'sender', type: 'address', indexed: true },
                     { name: 'amountInput', type: 'int128' },
                     { name: 'trader', type: 'address' },
-                    { name: 'zeroForOne', type: 'bool' }
+                    { name: 'zeroForOne', type: 'bool' },
+                    { name: 'currency0', type: 'address' },
+                    { name: 'currency1', type: 'address' },
+                    { name: 'fee', type: 'uint24' },
+                    { name: 'tickSpacing', type: 'int24' },
+                    { name: 'hooks', type: 'address' }
                 ]
             },
             onLogs: async (logs) => {
                 for (const log of logs) {
-                    const { id: poolId, sender, amountInput, trader, zeroForOne } = log.args;
+                    const { id: poolId, sender, amountInput, trader, zeroForOne, currency0, currency1, fee, tickSpacing, hooks } = log.args;
                     console.log(` New order detected:`);
                     console.log(`   Trader: ${trader!.slice(0, 8)}...`);
-                    console.log(`   Router: ${sender!.slice(0, 8)}...`);
                     console.log(`   Amount In: ${formatEther(BigInt(amountInput!))} tokens`);
                     console.log(`   Direction: ${zeroForOne ? "0→1" : "1→0"}`);
 
-                    await this.handleNewOrder(poolId!, trader!, BigInt(amountInput!), BigInt(0), zeroForOne!);
+                    const poolKey = {
+                        currency0: currency0!,
+                        currency1: currency1!,
+                        fee: Number(fee!),
+                        tickSpacing: Number(tickSpacing!),
+                        hooks: hooks!
+                    };
+
+                    await this.handleNewOrder(poolId!, trader!, BigInt(amountInput!), BigInt(0), zeroForOne!, poolKey);
                 }
             }
         });
@@ -366,7 +399,8 @@ class CowAVSOperator {
         trader: Address,
         amountInput: bigint,
         amountWanted: bigint,
-        zeroForOne: boolean
+        zeroForOne: boolean,
+        poolKey: { currency0: Address; currency1: Address; fee: number; tickSpacing: number; hooks: Address; }
     ): Promise<void> {
         const orderId = `${trader}-${poolId}-${Date.now()}`;
 
@@ -382,6 +416,7 @@ class CowAVSOperator {
             amountWanted: BigInt(amountWanted.toString()),
             zeroForOne,
             poolId,
+            poolKey,
             timestamp: Date.now(),
             blockNumber: await this.publicClient.getBlockNumber(),
             price
@@ -410,20 +445,17 @@ class CowAVSOperator {
 
         const matches = this.findOrderMatches();
         if (matches.length > 0) {
-            console.log(`🎯 Found ${matches.length} matches!`);
-            await this.createMatchingTask(matches);
+            console.log(`🎯 Found matches!`);
+
+            if (this.BYPASS_AVS_CONSENSUS) {
+                console.log(`🔄 Bypassing AVS consensus - direct settlement enabled`);
+                await this.settleCowMatchDirect(matches);
+            } else {
+                console.log(`⏳ Using full AVS consensus flow`);
+                await this.createMatchingTask(matches);
+            }
         } else {
             console.log(`❌ No matches found`);
-            // Debug why no matches
-            if (this.buyOrders.length > 0 && this.sellOrders.length > 0) {
-                console.log(`   🔍 Debug: Checking cross compatibility...`);
-                for (const buyOrder of this.buyOrders) {
-                    for (const sellOrder of this.sellOrders) {
-                        const canCross = this.canOrdersCross(buyOrder, sellOrder);
-                        console.log(`      Buy ${formatEther(buyOrder.amountInput)} (${buyOrder.trader.slice(0,8)}) vs Sell ${formatEther(sellOrder.amountInput)} (${sellOrder.trader.slice(0,8)}) = ${canCross}`);
-                    }
-                }
-            }
         }
     }
 
@@ -510,8 +542,6 @@ class CowAVSOperator {
         const sameTrader = buyOrder.trader === sellOrder.trader;
         const samePool = buyOrder.poolId === sellOrder.poolId;
         const oppositeDirections = buyOrder.zeroForOne !== sellOrder.zeroForOne;
-
-        console.log(`      Cross check: sameTrader=${sameTrader}, samePool=${samePool}, oppositeDirections=${oppositeDirections}`);
 
         return (
             !sameTrader &&
@@ -626,6 +656,51 @@ class CowAVSOperator {
 
         } catch (error) {
             console.error(" Failed to settle match:", error);
+        }
+    }
+
+    /**
+     * Direct settlement bypassing AVS consensus - calls contract immediately
+     */
+    private async settleCowMatchDirect(matches: OrderMatch[]): Promise<void> {
+        try {
+            console.log(`🚀 Direct settlement: Processing ${matches.length} matches...`);
+
+            for (const match of matches) {
+                console.log(`💰 Settling match directly:`);
+                console.log(`   Buy Orders: ${match.buyOrders.length} (${match.buyOrders.map(o => o.trader.slice(0,8)).join(', ')})`);
+                console.log(`   Sell Orders: ${match.sellOrders.length} (${match.sellOrders.map(o => o.trader.slice(0,8)).join(', ')})`);
+                console.log(`   Matched Amount: ${formatEther(match.matchedAmount)} tokens`);
+
+                // Get poolKey from the first order (all orders in a match should have the same pool)
+                const poolKey = match.buyOrders[0]?.poolKey || match.sellOrders[0]?.poolKey;
+
+                // Prepare settlement data
+                const buyers = match.buyOrders.map(order => order.trader);
+                const sellers = match.sellOrders.map(order => order.trader);
+                const buyerAmounts = match.buyOrders.map(order => order.amountInput);
+                const sellerAmounts = match.sellOrders.map(order => order.amountInput);
+
+                console.log(`   Calling settleCowMatches contract...`);
+
+                // Call the actual contract settlement
+                const tx = await this.privateCowContract.write.settleCowMatches([
+                    poolKey,
+                    buyers,
+                    sellers,
+                    buyerAmounts,
+                    sellerAmounts
+                ]);
+
+                await this.publicClient.waitForTransactionReceipt({ hash: tx });
+                console.log(`   ✅ Settlement completed: ${tx.slice(0, 10)}...`);
+
+                // Remove matched orders from order books
+                this.removeMatchedOrders(match);
+            }
+
+        } catch (error) {
+            console.error("❌ Direct settlement failed:", error);
         }
     }
 
@@ -761,14 +836,19 @@ async function main() {
     console.log("=============================\\n");
 
     // Configuration from environment
-    const PRIVATE_COW_ADDRESS = "0x11cAE71f4e583D9eA40c10ffD9023bd576d30888";
+    const PRIVATE_COW_ADDRESS = process.env.HOOK_ADDRESS || "";
     const SERVICE_MANAGER_ADDRESS = process.env.SERVICE_MANAGER_ADDRESS || "";
     const TASK_MANAGER_ADDRESS = process.env.TASK_MANAGER_ADDRESS || "";
     const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY || "";
     const RPC_URL = process.env.RPC_URL || "http://localhost:8545";
 
     if (!OPERATOR_PRIVATE_KEY) {
-        console.error(" Missing PRIVATE_KEY in environment");
+        console.error(" Missing OPERATOR_PRIVATE_KEY in environment");
+        process.exit(1);
+    }
+
+    if (!PRIVATE_COW_ADDRESS) {
+        console.error(" Missing HOOK_ADDRESS in environment");
         process.exit(1);
     }
 

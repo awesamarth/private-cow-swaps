@@ -10,7 +10,6 @@ import "../src/CowTaskManager.sol";
  * @dev Deployment script for CoW AVS contracts on local foundry
  */
 contract DeployCowAVS is Script {
-
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("OPERATOR_PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);

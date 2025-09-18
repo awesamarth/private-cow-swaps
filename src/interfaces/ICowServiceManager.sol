@@ -12,11 +12,7 @@ interface ICowServiceManager {
     event StakeUpdated(address indexed operator, uint256 newStake);
     event OperatorSlashed(address indexed operator, uint256 amount);
     event RewardDistributed(address indexed operator, uint256 amount);
-    event TaskValidationRewarded(
-        uint32 indexed taskIndex,
-        address indexed operator,
-        uint256 reward
-    );
+    event TaskValidationRewarded(uint32 indexed taskIndex, address indexed operator, uint256 reward);
 
     /**
      * @dev Register as an operator with minimum stake
@@ -51,18 +47,12 @@ interface ICowServiceManager {
     /**
      * @dev Set reward amount for a task
      */
-    function setTaskReward(
-        uint32 taskIndex,
-        uint256 rewardAmount
-    ) external payable;
+    function setTaskReward(uint32 taskIndex, uint256 rewardAmount) external payable;
 
     /**
      * @dev Distribute rewards to operators who validated CoW matches correctly
      */
-    function distributeTaskReward(
-        uint32 taskIndex,
-        address[] calldata validOperators
-    ) external;
+    function distributeTaskReward(uint32 taskIndex, address[] calldata validOperators) external;
 
     /**
      * @dev Slash operator for malicious behavior

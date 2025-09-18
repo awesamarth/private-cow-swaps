@@ -27,15 +27,11 @@ contract PrivateCow is BaseHook {
 
     // router of the swap
     event HookSwap(
-        bytes32 indexed id,
-        address indexed sender,
-        int128 amountInput,
-        uint256 amountWanted,
-        bool zeroForOne
+        bytes32 indexed id, address indexed sender, int128 amountInput, uint256 amountWanted, bool zeroForOne
     );
 
     event HookModifyLiquidity(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1);
-    
+
     event CowMatchSettled(bytes32 indexed matchHash, address indexed buyer, address indexed seller, uint256 amount);
 
     struct CallbackData {
@@ -54,15 +50,15 @@ contract PrivateCow is BaseHook {
         return Hooks.Permissions({
             beforeInitialize: false,
             afterInitialize: false,
-            beforeAddLiquidity: true, 
+            beforeAddLiquidity: true,
             afterAddLiquidity: false,
             beforeRemoveLiquidity: false,
             afterRemoveLiquidity: false,
-            beforeSwap: true, 
+            beforeSwap: true,
             afterSwap: false,
             beforeDonate: false,
             afterDonate: false,
-            beforeSwapReturnDelta: true, 
+            beforeSwapReturnDelta: true,
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
@@ -114,17 +110,20 @@ contract PrivateCow is BaseHook {
         return "";
     }
 
-    function _postBeforeSwap(address sender, PoolKey calldata key, int128 absInputAmount, bool zeroForOne, bytes calldata hookData) internal {
-    if (hookData.length > 0) {
-        uint256 amountWanted = abi.decode(hookData, (uint256));
-        console.log("amount", amountWanted);
+    function _postBeforeSwap(
+        address sender,
+        PoolKey calldata key,
+        int128 absInputAmount,
+        bool zeroForOne,
+        bytes calldata hookData
+    ) internal {
+        if (hookData.length > 0) {
+            uint256 amountWanted = abi.decode(hookData, (uint256));
+            console.log("amount", amountWanted);
 
-
-    emit HookSwap(PoolId.unwrap(key.toId()), sender, -absInputAmount, amountWanted, zeroForOne);
-
+            emit HookSwap(PoolId.unwrap(key.toId()), sender, -absInputAmount, amountWanted, zeroForOne);
+        }
     }
-
-}
 
     // Swapping
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
@@ -132,15 +131,14 @@ contract PrivateCow is BaseHook {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-
         int128 absInputAmount;
         BeforeSwapDelta beforeSwapDelta;
-        if ( params.amountSpecified < 0) {
+        if (params.amountSpecified < 0) {
             absInputAmount = int128(-params.amountSpecified);
 
             beforeSwapDelta = toBeforeSwapDelta(
                 absInputAmount, // abs(params.amountSpecified) of input token owed from uniswap to hook
-                0 
+                0
             );
         }
 
@@ -151,12 +149,12 @@ contract PrivateCow is BaseHook {
             // We will burn claim tokens for Token 1 from the hook so PM can pay the user
             // and create an equivalent debit for Token 1 since it is ours!
 
-        _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
+            _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         } else {
             // Sell order: token1 -> token0
-        key.currency1.take(poolManager, address(this), uint256(uint128(absInputAmount)), false);
+            key.currency1.take(poolManager, address(this), uint256(uint128(absInputAmount)), false);
 
-        _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
+            _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         }
 
         return (this.beforeSwap.selector, beforeSwapDelta, 0);
@@ -171,7 +169,7 @@ contract PrivateCow is BaseHook {
     function registerOperator() external payable {
         require(msg.value >= 0.01 ether, "Minimum stake required");
         require(!operators[msg.sender], "Already registered");
-        
+
         operators[msg.sender] = true;
         operatorStake[msg.sender] = msg.value;
     }
@@ -184,23 +182,16 @@ contract PrivateCow is BaseHook {
         Currency[] calldata currencies
     ) external onlyOperator {
         require(
-            matchHashes.length == buyers.length &&
-            buyers.length == sellers.length &&
-            sellers.length == amounts.length &&
-            amounts.length == currencies.length,
+            matchHashes.length == buyers.length && buyers.length == sellers.length && sellers.length == amounts.length
+                && amounts.length == currencies.length,
             "Array length mismatch"
         );
 
         for (uint256 i = 0; i < matchHashes.length; i++) {
             // Transfer tokens between matched traders using pool manager's claim tokens
             // This is simplified - in production would need proper token accounting
-            
-            emit CowMatchSettled(
-                matchHashes[i],
-                buyers[i],
-                sellers[i],
-                amounts[i]
-            );
+
+            emit CowMatchSettled(matchHashes[i], buyers[i], sellers[i], amounts[i]);
         }
     }
 }

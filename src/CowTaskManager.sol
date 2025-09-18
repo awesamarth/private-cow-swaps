@@ -16,19 +16,16 @@ contract CowTaskManager is ICowTaskManager {
     mapping(uint32 => TaskResponse[]) public taskResponses;
     mapping(uint32 => mapping(bytes32 => uint256)) public responseVotes;
     mapping(uint32 => mapping(address => bool)) public hasResponded;
-    
+
     uint32 public latestTaskNum;
-    
+
     // Configuration
     uint256 public constant TASK_RESPONSE_WINDOW = 1 hours;
     uint256 public constant MIN_QUORUM_THRESHOLD = 51; // 51%
     uint256 public constant MAX_QUORUM_THRESHOLD = 100; // 100%
 
     modifier onlyValidOperator() {
-        require(
-            serviceManager.isValidOperator(msg.sender),
-            "Invalid operator"
-        );
+        require(serviceManager.isValidOperator(msg.sender), "Invalid operator");
         _;
     }
 
@@ -39,15 +36,15 @@ contract CowTaskManager is ICowTaskManager {
     /**
      * @dev Create a new task for CoW match validation
      */
-    function createNewTask(
-        bytes32 matchHash,
-        uint32 quorumThreshold,
-        bytes calldata quorumNumbers
-    ) external payable override onlyValidOperator {
+    function createNewTask(bytes32 matchHash, uint32 quorumThreshold, bytes calldata quorumNumbers)
+        external
+        payable
+        override
+        onlyValidOperator
+    {
         require(matchHash != bytes32(0), "Invalid match hash");
         require(
-            quorumThreshold >= MIN_QUORUM_THRESHOLD && 
-            quorumThreshold <= MAX_QUORUM_THRESHOLD,
+            quorumThreshold >= MIN_QUORUM_THRESHOLD && quorumThreshold <= MAX_QUORUM_THRESHOLD,
             "Invalid quorum threshold"
         );
 
@@ -74,14 +71,14 @@ contract CowTaskManager is ICowTaskManager {
     /**
      * @dev Respond to a task with validation result
      */
-    function respondToTask(
-        bytes32 matchHash,
-        bytes32 response,
-        bytes calldata signature
-    ) external override onlyValidOperator {
+    function respondToTask(bytes32 matchHash, bytes32 response, bytes calldata signature)
+        external
+        override
+        onlyValidOperator
+    {
         uint32 taskIndex = _findTaskByMatchHash(matchHash);
         require(taskIndex < latestTaskNum, "Task not found");
-        
+
         Task storage task = tasks[taskIndex];
         require(!task.isCompleted, "Task already completed");
         require(!hasResponded[taskIndex][msg.sender], "Already responded");
@@ -94,12 +91,9 @@ contract CowTaskManager is ICowTaskManager {
         require(signature.length > 0, "Invalid signature");
 
         // Record response
-        taskResponses[taskIndex].push(TaskResponse({
-            response: response,
-            operator: msg.sender,
-            signature: signature,
-            timestamp: block.timestamp
-        }));
+        taskResponses[taskIndex].push(
+            TaskResponse({response: response, operator: msg.sender, signature: signature, timestamp: block.timestamp})
+        );
 
         hasResponded[taskIndex][msg.sender] = true;
         responseVotes[taskIndex][response]++;
@@ -122,7 +116,7 @@ contract CowTaskManager is ICowTaskManager {
 
         uint256 totalOperators = serviceManager.getActiveOperatorCount();
         uint256 totalResponses = taskResponses[taskIndex].length;
-        
+
         // Need minimum percentage of operators to respond
         if (totalResponses * 100 < totalOperators * task.quorumThreshold) {
             return;
@@ -131,11 +125,11 @@ contract CowTaskManager is ICowTaskManager {
         // Find the response with most votes
         bytes32 consensusResponse;
         uint256 maxVotes = 0;
-        
+
         for (uint256 i = 0; i < taskResponses[taskIndex].length; i++) {
             bytes32 response = taskResponses[taskIndex][i].response;
             uint256 votes = responseVotes[taskIndex][response];
-            
+
             if (votes > maxVotes) {
                 maxVotes = votes;
                 consensusResponse = response;
@@ -145,7 +139,7 @@ contract CowTaskManager is ICowTaskManager {
         // Check if consensus response has enough votes
         if (maxVotes * 100 >= totalResponses * task.quorumThreshold) {
             task.isCompleted = true;
-            
+
             emit QuorumReached(taskIndex, consensusResponse, uint32(maxVotes));
             emit ConsensusAchieved(taskIndex, consensusResponse);
 
@@ -214,7 +208,7 @@ contract CowTaskManager is ICowTaskManager {
      */
     function hasConsensus(uint32 taskIndex) external view override returns (bool, bytes32) {
         require(taskIndex < latestTaskNum, "Task does not exist");
-        
+
         Task memory task = tasks[taskIndex];
         if (!task.isCompleted) {
             return (false, bytes32(0));
@@ -223,11 +217,11 @@ contract CowTaskManager is ICowTaskManager {
         // Find consensus response
         bytes32 consensusResponse;
         uint256 maxVotes = 0;
-        
+
         for (uint256 i = 0; i < taskResponses[taskIndex].length; i++) {
             bytes32 response = taskResponses[taskIndex][i].response;
             uint256 votes = responseVotes[taskIndex][response];
-            
+
             if (votes > maxVotes) {
                 maxVotes = votes;
                 consensusResponse = response;
@@ -251,7 +245,7 @@ contract CowTaskManager is ICowTaskManager {
      */
     function forceCompleteTask(uint32 taskIndex) external {
         require(taskIndex < latestTaskNum, "Task does not exist");
-        
+
         Task storage task = tasks[taskIndex];
         require(!task.isCompleted, "Task already completed");
         require(

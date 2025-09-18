@@ -19,7 +19,7 @@ contract TestBatchMatching is Script {
     using CurrencyLibrary for Currency;
 
     // Use deployed addresses
-    address constant HOOK_ADDRESS = 0x11cAE71f4e583D9eA40c10ffD9023bd576d30888;
+    address HOOK_ADDRESS = vm.envAddress("HOOK_ADDRESS");
     address constant POOL_MANAGER = 0x5FbDB2315678afecb367f032d93F642f64180aa3;
 
     function run() external {
@@ -57,13 +57,8 @@ contract TestBatchMatching is Script {
             ? (Currency.wrap(address(token0)), Currency.wrap(address(token1)))
             : (Currency.wrap(address(token1)), Currency.wrap(address(token0)));
 
-        PoolKey memory key = PoolKey({
-            currency0: curr0,
-            currency1: curr1,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(HOOK_ADDRESS)
-        });
+        PoolKey memory key =
+            PoolKey({currency0: curr0, currency1: curr1, fee: 3000, tickSpacing: 60, hooks: IHooks(HOOK_ADDRESS)});
 
         // Initialize pool (1:1 price)
         IPoolManager(POOL_MANAGER).initialize(key, TickMath.getSqrtPriceAtTick(0));
@@ -93,14 +88,11 @@ contract TestBatchMatching is Script {
         swapRouter.swap(
             key,
             SwapParams({
-                zeroForOne: true,        // Buy order (token0 → token1)
+                zeroForOne: true, // Buy order (token0 → token1)
                 amountSpecified: -100e18, // Input exactly 100 tokens
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             abi.encode(buyer) // Pass buyer address
         );
 
@@ -124,14 +116,11 @@ contract TestBatchMatching is Script {
         swapRouter.swap(
             key,
             SwapParams({
-                zeroForOne: false,       // Sell order (token1 → token0)
+                zeroForOne: false, // Sell order (token1 → token0)
                 amountSpecified: -15e18, // Input exactly 15 tokens
                 sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
             }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             abi.encode(seller)
         );
 
@@ -142,15 +131,8 @@ contract TestBatchMatching is Script {
         console.log("3. Small SELL order from SELLER: 15 token1 -> token0");
         swapRouter.swap(
             key,
-            SwapParams({
-                zeroForOne: false,
-                amountSpecified: -15e18,
-                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
-            }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            SwapParams({zeroForOne: false, amountSpecified: -15e18, sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             abi.encode(seller)
         );
 
@@ -161,15 +143,8 @@ contract TestBatchMatching is Script {
         console.log("4. Small SELL order from SELLER: 20 token1 -> token0");
         swapRouter.swap(
             key,
-            SwapParams({
-                zeroForOne: false,
-                amountSpecified: -20e18,
-                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
-            }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            SwapParams({zeroForOne: false, amountSpecified: -20e18, sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             abi.encode(seller)
         );
 

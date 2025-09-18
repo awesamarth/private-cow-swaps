@@ -20,7 +20,6 @@ import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol
 import {console} from "forge-std/console.sol";
 
 contract DeployCowHook is Script, Deployers {
-
     // Override to fix address(this) issue in scripts
     function deployFreshManager() internal override {
         manager = new PoolManager(msg.sender); // Use msg.sender instead of address(this)
@@ -35,12 +34,8 @@ contract DeployCowHook is Script, Deployers {
         deployFreshManagerAndRouters();
 
         // Calculate hook flags and address
-        uint160 flags = uint160(
-            Hooks.BEFORE_ADD_LIQUIDITY_FLAG |
-                Hooks.BEFORE_SWAP_FLAG |
-                Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        );
-        address hookAddress = address(flags);
+        uint160 flags =
+            uint160(Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG);
 
         console.log("Mining hook address...");
 
@@ -54,7 +49,6 @@ contract DeployCowHook is Script, Deployers {
         );
 
         console.log("Mined address:", minedAddress);
-        console.log("Required address:", hookAddress);
 
         // Deploy hook using CREATE2 with mined salt
         PrivateCow hook = new PrivateCow{salt: salt}(manager);
@@ -64,10 +58,5 @@ contract DeployCowHook is Script, Deployers {
 
         vm.stopBroadcast();
 
-        console.log("");
-        
-        console.log("Update your .env:");
-        console.log("PRIVATE_COW_ADDRESS=", hookAddress);
-        console.log("POOL_MANAGER_ADDRESS=", address(manager));
     }
 }

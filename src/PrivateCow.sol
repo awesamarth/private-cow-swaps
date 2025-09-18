@@ -31,18 +31,34 @@ contract PrivateCow is BaseHook {
         address indexed sender,
         int128 amountInput,
         address trader,
-        bool zeroForOne
+        bool zeroForOne,
+        address currency0,
+        address currency1,
+        uint24 fee,
+        int24 tickSpacing,
+        address hooks
     );
 
     event HookModifyLiquidity(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1);
-    
+
     event CowMatchSettled(bytes32 indexed matchHash, address indexed buyer, address indexed seller, uint256 amount);
 
     struct CallbackData {
+        bool cowMatch;
         uint256 amountEach;
         Currency currency0;
         Currency currency1;
         address sender;
+    }
+
+    struct CowSettleData {
+        bool cowMatch;
+        Currency currency0;
+        Currency currency1;
+        address[] buyers;
+        address[] sellers;
+        uint256[] buyerAmounts;
+        uint256[] sellerAmounts;
     }
 
     mapping(address => bool) public operators;
@@ -54,15 +70,15 @@ contract PrivateCow is BaseHook {
         return Hooks.Permissions({
             beforeInitialize: false,
             afterInitialize: false,
-            beforeAddLiquidity: true, 
+            beforeAddLiquidity: true,
             afterAddLiquidity: false,
             beforeRemoveLiquidity: false,
             afterRemoveLiquidity: false,
-            beforeSwap: true, 
+            beforeSwap: true,
             afterSwap: false,
             beforeDonate: false,
             afterDonate: false,
-            beforeSwapReturnDelta: true, 
+            beforeSwapReturnDelta: true,
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
@@ -81,50 +97,102 @@ contract PrivateCow is BaseHook {
 
     // Custom add liquidity function
     function addLiquidity(PoolKey calldata key, uint256 amountEach) external {
-        poolManager.unlock(abi.encode(CallbackData(amountEach, key.currency0, key.currency1, msg.sender)));
-
-        emit HookModifyLiquidity(
-            PoolId.unwrap(key.toId()), address(this), int128(uint128(amountEach)), int128(uint128(amountEach))
+        poolManager.unlock(
+            abi.encode(
+                CallbackData({
+                    cowMatch: false,
+                    amountEach: amountEach,
+                    currency0: key.currency0,
+                    currency1: key.currency1,
+                    sender: msg.sender
+                })
+            )
         );
     }
 
     function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
-        CallbackData memory callbackData = abi.decode(data, (CallbackData));
+        console.log("unlockCallback called");
 
-        // Settle `amountEach` of each currency from the sender
-        // i.e. Create a debit of `amountEach` of each currency with the Pool Manager
-        callbackData.currency0.settle(
-            poolManager,
-            callbackData.sender,
-            callbackData.amountEach,
-            false // `burn` = `false` i.e. we're actually transferring tokens, not burning ERC-6909 Claim Tokens
-        );
-        callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+        // Decode first field (cowMatch bool) to determine which struct
+        bool cowMatch;
+        assembly {
+            cowMatch := calldataload(add(data.offset, 0))
+        }
 
-        // We will store those claim tokens with the hook, so when swaps take place
-        // liquidity from our CSMM can be used by minting/burning claim tokens the hook owns
-        callbackData.currency0.take(
-            poolManager,
-            address(this),
-            callbackData.amountEach,
-            true // true = mint claim tokens for the hook, equivalent to money we just deposited to the PM
-        );
-        callbackData.currency1.take(poolManager, callbackData.sender, callbackData.amountEach, true);
+        console.log("cowMatch decoded:", cowMatch);
+
+        if (!cowMatch) {
+            CallbackData memory callbackData = abi.decode(data, (CallbackData));
+
+
+            callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+            callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
+
+            callbackData.currency0.take(poolManager, address(this), callbackData.amountEach, true);
+            callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
+        } else {
+            console.log("unlock type is settle cow matches");
+
+            CowSettleData memory cowData = abi.decode(data, (CowSettleData));
+
+            console.log("buyers length:", cowData.buyers.length);
+            console.log("sellers length:", cowData.sellers.length);
+
+            // Give token1 to buyers (who deposited token0)
+            for (uint256 i = 0; i < cowData.buyers.length; i++) {
+                console.log("settling buyer:", cowData.buyers[i]);
+                console.log("buyer amount:", cowData.buyerAmounts[i]);
+
+                uint256 hookToken1Claims = poolManager.balanceOf(address(this), cowData.currency1.toId());
+                uint256 buyerToken1Claims = poolManager.balanceOf(cowData.buyers[i], cowData.currency1.toId());
+                console.log("Hook token1 claims:", hookToken1Claims);
+                console.log("Buyer token1 claims before settle:", buyerToken1Claims);
+
+                // Hook burns its token1 claims
+                cowData.currency1.settle(poolManager, address(this), cowData.buyerAmounts[i], true);
+                // Alice gets real token1 (not claims)
+                cowData.currency1.take(poolManager, cowData.buyers[i], cowData.buyerAmounts[i], false);
+            }
+
+            // Give token0 to sellers (who deposited token1)
+            for (uint256 i = 0; i < cowData.sellers.length; i++) {
+                console.log("settling seller:", cowData.sellers[i]);
+                console.log("seller amount:", cowData.sellerAmounts[i]);
+                // Hook burns its token0 claims
+                cowData.currency0.settle(poolManager, address(this), cowData.sellerAmounts[i], true);
+                // Bob gets real token0 (not claims)
+                cowData.currency0.take(poolManager, cowData.sellers[i], cowData.sellerAmounts[i], false);
+            }
+        }
 
         return "";
     }
 
-    function _postBeforeSwap(address sender, PoolKey calldata key, int128 absInputAmount, bool zeroForOne, bytes calldata hookData) internal {
-    if (hookData.length > 0) {
-        address addressOfSender = abi.decode(hookData, (address));
-        console.log("address of trader", addressOfSender);
+    function _postBeforeSwap(
+        address sender,
+        PoolKey calldata key,
+        int128 absInputAmount,
+        bool zeroForOne,
+        bytes calldata hookData
+    ) internal {
+        if (hookData.length > 0) {
+            address addressOfSender = abi.decode(hookData, (address));
+            console.log("address of trader", addressOfSender);
 
-
-    emit HookSwap(PoolId.unwrap(key.toId()), sender, -absInputAmount, addressOfSender, zeroForOne);
-
+            emit HookSwap(
+                PoolId.unwrap(key.toId()),
+                sender,
+                -absInputAmount,
+                addressOfSender,
+                zeroForOne,
+                Currency.unwrap(key.currency0),
+                Currency.unwrap(key.currency1),
+                key.fee,
+                key.tickSpacing,
+                address(key.hooks)
+            );
+        }
     }
-
-}
 
     // Swapping
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
@@ -132,31 +200,31 @@ contract PrivateCow is BaseHook {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-
         int128 absInputAmount;
         BeforeSwapDelta beforeSwapDelta;
-        if ( params.amountSpecified < 0) {
+        if (params.amountSpecified < 0) {
             absInputAmount = int128(-params.amountSpecified);
 
             beforeSwapDelta = toBeforeSwapDelta(
                 absInputAmount, // abs(params.amountSpecified) of input token owed from uniswap to hook
-                0 
+                0
             );
         }
 
         if (params.zeroForOne) {
-            key.currency0.take(poolManager, address(this), uint256(uint128(absInputAmount)), false);
+            key.currency0.take(poolManager, address(this), uint256(uint128(absInputAmount)), true);
 
             // They will be receiving Token 1 from the PM, creating a credit of Token 1 in the PM
             // We will burn claim tokens for Token 1 from the hook so PM can pay the user
             // and create an equivalent debit for Token 1 since it is ours!
 
-        _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
+            _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         } else {
             // Sell order: token1 -> token0
-        key.currency1.take(poolManager, address(this), uint256(uint128(absInputAmount)), false);
+            key.currency1.take(poolManager, address(this), uint256(uint128(absInputAmount)), true);
+            // key.currency1.settle(poolManager, address(this), uint256(uint128(absInputAmount)), true);
 
-        _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
+            _postBeforeSwap(sender, key, -absInputAmount, params.zeroForOne, hookData);
         }
 
         return (this.beforeSwap.selector, beforeSwapDelta, 0);
@@ -164,42 +232,48 @@ contract PrivateCow is BaseHook {
 
     // AVS Functions
     modifier onlyOperator() {
-        require(operators[msg.sender], "Not a registered operator");
+        require(msg.sender==0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, "Not a registered operator");
         _;
     }
 
     function registerOperator() external payable {
         require(msg.value >= 0.01 ether, "Minimum stake required");
         require(!operators[msg.sender], "Already registered");
-        
+
         operators[msg.sender] = true;
         operatorStake[msg.sender] = msg.value;
     }
 
     function settleCowMatches(
+        PoolKey calldata key,
         address[] calldata buyers,
         address[] calldata sellers,
-        uint256[] calldata sellerAmounts,
-        uint256 [] calldata buyerAmounts
+        uint256[] calldata buyerAmounts,
+        uint256[] calldata sellerAmounts
     ) external onlyOperator {
-        require(
-            buyers.length == sellers.length &&
-            sellers.length == sellerAmounts.length&&
-            buyers.length == buyerAmounts.length,
+        require(buyers.length == buyerAmounts.length && sellers.length == sellerAmounts.length, "Array length mismatch");
 
-            "Array length mismatch"
+        console.log("calling unlock on poolmanager via cow contract");
+
+        console.log("currency0: ", Currency.unwrap(key.currency0));
+        console.log("currency1: ", Currency.unwrap(key.currency1));
+        console.log("buyers: ", buyers[0]);
+        console.log("sellers: ", sellers[0]);
+        console.log("buyer amounts: ", buyerAmounts[0]);
+        console.log("seller amounts: ", sellerAmounts[0]);
+
+        poolManager.unlock(
+            abi.encode(
+                CowSettleData({
+                    cowMatch: true,
+                    currency0: key.currency0,
+                    currency1: key.currency1,
+                    buyers: buyers,
+                    sellers: sellers,
+                    buyerAmounts: buyerAmounts,
+                    sellerAmounts: sellerAmounts
+                })
+            )
         );
-
-        for (uint256 i = 0; i < matchHashes.length; i++) {
-            // Transfer tokens between matched traders using pool manager's claim tokens
-            // This is simplified - in production would need proper token accounting
-            
-            emit CowMatchSettled(
-                matchHashes[i],
-                buyers[i],
-                sellers[i],
-                amounts[i]
-            );
-        }
     }
 }

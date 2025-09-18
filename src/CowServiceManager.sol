@@ -31,10 +31,7 @@ contract CowServiceManager is ICowServiceManager {
     mapping(address => bool) public taskManagers;
 
     modifier onlyValidOperator() {
-        require(
-            operators[msg.sender] && !isSlashed[msg.sender],
-            "Invalid or slashed operator"
-        );
+        require(operators[msg.sender] && !isSlashed[msg.sender], "Invalid or slashed operator");
         _;
     }
 
@@ -125,7 +122,7 @@ contract CowServiceManager is ICowServiceManager {
      */
     function recordTaskValidation(uint32 taskIndex, address operator) external override onlyTaskManager {
         require(operators[operator] && !isSlashed[operator], "Invalid operator");
-        
+
         hasValidated[taskIndex][operator] = true;
     }
 
@@ -134,14 +131,18 @@ contract CowServiceManager is ICowServiceManager {
      */
     function setTaskReward(uint32 taskIndex, uint256 rewardAmount) external payable override onlyTaskManager {
         require(msg.value >= rewardAmount, "Insufficient reward funding");
-        
+
         taskRewards[taskIndex] = rewardAmount;
     }
 
     /**
      * @dev Distribute rewards to operators who validated CoW matches correctly
      */
-    function distributeTaskReward(uint32 taskIndex, address[] calldata validOperators) external override onlyTaskManager {
+    function distributeTaskReward(uint32 taskIndex, address[] calldata validOperators)
+        external
+        override
+        onlyTaskManager
+    {
         uint256 totalReward = taskRewards[taskIndex];
         require(totalReward > 0, "No reward set");
         require(validOperators.length > 0, "No valid operators");
@@ -151,9 +152,9 @@ contract CowServiceManager is ICowServiceManager {
         for (uint256 i = 0; i < validOperators.length; i++) {
             address operator = validOperators[i];
             require(hasValidated[taskIndex][operator], "Operator did not validate");
-            
+
             rewardAccumulated[operator] += rewardPerOperator;
-            
+
             emit TaskValidationRewarded(taskIndex, operator, rewardPerOperator);
         }
 
@@ -169,7 +170,7 @@ contract CowServiceManager is ICowServiceManager {
         require(amount <= operatorStake[operator], "Slash amount exceeds stake");
 
         operatorStake[operator] -= amount;
-        
+
         // If stake falls below minimum, mark as slashed
         if (operatorStake[operator] < MIN_OPERATOR_STAKE) {
             isSlashed[operator] = true;
@@ -183,7 +184,7 @@ contract CowServiceManager is ICowServiceManager {
      */
     function claimRewards() external override {
         require(operators[msg.sender], "Not an operator");
-        
+
         uint256 rewards = rewardAccumulated[msg.sender];
         require(rewards > 0, "No rewards to claim");
 
