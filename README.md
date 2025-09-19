@@ -2,6 +2,9 @@
 
 A Uniswap V4 hook enabling private Coincidence of Wants (CoW) swaps with encrypted order matching through EigenLayer AVS operators.
 
+## Video Demo
+https://www.youtube.com/watch?v=kDJEZHJ8XoQ
+
 ## Overview
 
 This project implements a privacy-preserving order matching system for Uniswap V4 pools that prevents MEV extraction by:
