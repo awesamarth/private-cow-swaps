@@ -57,6 +57,5 @@ contract DeployCowHook is Script, Deployers {
         console.log("PoolManager deployed at:", address(manager));
 
         vm.stopBroadcast();
-
     }
 }

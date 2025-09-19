@@ -37,10 +37,10 @@ contract PrivateCowEncryptedTest is Test, Deployers {
         address hooks
     );
 
-    event EncryptedHookSwap(
+    event EncryptedHookSwap( // In tests, these will be mock encrypted values
         bytes32 indexed id,
         address indexed sender,
-        bytes encryptedAmount,    // In tests, these will be mock encrypted values
+        bytes encryptedAmount,
         bytes encryptedTrader,
         bool zeroForOne,
         address currency0,
@@ -153,7 +153,4 @@ contract PrivateCowEncryptedTest is Test, Deployers {
         console.log("Contract deployed successfully");
         console.log("Ready for FHE integration when moved to Fhenix testnet");
     }
-
-
-
 }

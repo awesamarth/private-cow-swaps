@@ -117,7 +117,7 @@ contract SimpleSwapTest is Script {
             key,
             SwapParams({
                 zeroForOne: false, // Sell order (token1 → token0)
-                amountSpecified: -100e18, 
+                amountSpecified: -100e18,
                 sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
             }),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
@@ -126,8 +126,6 @@ contract SimpleSwapTest is Script {
 
         console.log("First sell order submitted by SELLER");
         vm.sleep(2000);
-
-
 
         console.log("");
         console.log("BATCH MATCHING TEST COMPLETE!");

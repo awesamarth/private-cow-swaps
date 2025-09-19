@@ -12,9 +12,6 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {console} from "forge-std/console.sol";
 
-
-
-
 contract PrivateCow is BaseHook {
     using CurrencySettler for Currency;
 
@@ -114,10 +111,8 @@ contract PrivateCow is BaseHook {
             cowMatch := calldataload(add(data.offset, 0))
         }
 
-
         if (!cowMatch) {
             CallbackData memory callbackData = abi.decode(data, (CallbackData));
-
 
             callbackData.currency0.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
             callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
@@ -125,14 +120,10 @@ contract PrivateCow is BaseHook {
             callbackData.currency0.take(poolManager, address(this), callbackData.amountEach, true);
             callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
         } else {
-
             CowSettleData memory cowData = abi.decode(data, (CowSettleData));
-
 
             // Give token1 to buyers (who deposited token0)
             for (uint256 i = 0; i < cowData.buyers.length; i++) {
-
-
                 // Hook burns its token1 claims
                 cowData.currency1.settle(poolManager, address(this), cowData.buyerAmounts[i], true);
                 // Alice gets real token1 (not claims)
@@ -214,7 +205,7 @@ contract PrivateCow is BaseHook {
 
     // AVS Functions
     modifier onlyOperator() {
-        require(msg.sender==0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, "Not a registered operator");
+        require(msg.sender == 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, "Not a registered operator");
         _;
     }
 

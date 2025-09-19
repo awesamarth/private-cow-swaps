@@ -12,7 +12,6 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {console} from "forge-std/console.sol";
 
-
 contract PrivateCow is BaseHook {
     using CurrencySettler for Currency;
 

@@ -90,7 +90,6 @@ contract PrivateCowTest is Test, Deployers {
         );
         uint256 balanceOfTokenAAfter = key.currency0.balanceOf(alice);
 
-
         assertEq(balanceOfTokenABefore - balanceOfTokenAAfter, 100e18);
     }
 
@@ -109,16 +108,12 @@ contract PrivateCowTest is Test, Deployers {
         );
         uint256 balanceOfTokenBAfter = key.currency1.balanceOf(alice);
 
-
         assertEq(balanceOfTokenBBefore - balanceOfTokenBAfter, 100e18);
     }
 
     function test_settleCowMatches() public {
-
-
         // Check Alice's initial balances
         uint256 aliceToken1Before = key.currency1.balanceOf(alice);
-
 
         // Prepare settlement data - Alice and Bob both as buyer and seller (simplest test)
         address[] memory buyers = new address[](1);
@@ -135,16 +130,9 @@ contract PrivateCowTest is Test, Deployers {
 
         // Call settleCowMatches as the hardcoded operator
         vm.prank(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266);
-        hook.settleCowMatches(
-            key,
-            buyers,
-            sellers,
-            buyerAmounts,
-            sellerAmounts
-        );
+        hook.settleCowMatches(key, buyers, sellers, buyerAmounts, sellerAmounts);
 
         uint256 aliceToken1After = key.currency1.balanceOf(alice);
-
 
         // Alice should have received 50 token1
         assertEq(aliceToken1After, aliceToken1Before + 50 ether);

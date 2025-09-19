@@ -39,11 +39,12 @@ contract PrivateCowEncrypted is BaseHook {
     );
 
     // Encrypted events for privacy (amounts and addresses hidden)
-    event EncryptedHookSwap(
+    event EncryptedHookSwap( // Encrypted amount
+        // Encrypted trader address
         bytes32 indexed id,
         address indexed sender,
-        euint128 encryptedAmount,    // Encrypted amount
-        euint256 encryptedTrader,    // Encrypted trader address
+        euint128 encryptedAmount,
+        euint256 encryptedTrader,
         bool zeroForOne,
         address currency0,
         address currency1,
@@ -234,8 +235,8 @@ contract PrivateCowEncrypted is BaseHook {
         emit EncryptedHookSwap(
             PoolId.unwrap(key.toId()),
             sender,
-            encryptedAmount,      // Amount is now encrypted
-            encryptedTrader,      // Trader address is now encrypted
+            encryptedAmount, // Amount is now encrypted
+            encryptedTrader, // Trader address is now encrypted
             zeroForOne,
             Currency.unwrap(key.currency0),
             Currency.unwrap(key.currency1),
@@ -276,7 +277,7 @@ contract PrivateCowEncrypted is BaseHook {
 
     // AVS Functions
     modifier onlyOperator() {
-        require(msg.sender==0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, "Not a registered operator");
+        require(msg.sender == 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, "Not a registered operator");
         _;
     }
 
@@ -326,7 +327,7 @@ contract PrivateCowEncrypted is BaseHook {
         FHE.decrypt(encryptedAmount);
     }
 
-    function getDecryptedAmountForDemo(euint128 encryptedAmount) external view returns(uint256) {
+    function getDecryptedAmountForDemo(euint128 encryptedAmount) external view returns (uint256) {
         (uint256 value, bool decrypted) = FHE.getDecryptResultSafe(encryptedAmount);
         if (!decrypted) revert("Value is not ready");
         return value;
