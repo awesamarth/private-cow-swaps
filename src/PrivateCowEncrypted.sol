@@ -39,8 +39,8 @@ contract PrivateCowEncrypted is BaseHook {
     );
 
     // Encrypted events for privacy (amounts and addresses hidden)
+    // Encrypted trader address
     event EncryptedHookSwap( // Encrypted amount
-        // Encrypted trader address
         bytes32 indexed id,
         address indexed sender,
         euint128 encryptedAmount,
