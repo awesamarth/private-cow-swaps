@@ -51,11 +51,20 @@ Main hook contract implementing:
 - pnpm
 
 ### Environment Setup
+in the root directory
 ```bash
 # Required environment variables
 OPERATOR_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-HOOK_ADDRESS=0x0427F86546fE98aF98Fc540a5e32eAd7D0814888  # Updated after each deployment
-RPC_URL=http://localhost:8545
+HOOK_ADDRESS=0x0427F86546fE98aF98Fc540a5e32eAd7D0814888  # this is to be updated after each deployment
+```
+
+in the `operator` directory
+```bash
+OPERATOR_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+POOL_MANAGER_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+SERVICE_MANAGER_ADDRESS=0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0
+TASK_MANAGER_ADDRESS=0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82
+HOOK_ADDRESS=0x675a14D9c835bB19cC22691bf0778EA1807DC888 #this is to be updated after each deployment
 ```
 
 ### Installation
@@ -81,6 +90,8 @@ forge script script/DeployCowHook.s.sol --rpc-url http://localhost:8545 --broadc
 # Deploy AVS contracts
 forge script script/DeployCowAVS.s.sol --rpc-url http://localhost:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
+
+Make sure to update the `HOOK_ADDRESS` in both `.env` files after deployment.
 
 ### 3. Verify Deployment
 ```bash
