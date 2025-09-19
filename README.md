@@ -62,6 +62,7 @@ RPC_URL=http://localhost:8545
 ```bash
 # Install dependencies
 forge install
+pnpm install
 cd operator && pnpm install
 ```
 
@@ -98,12 +99,17 @@ pnpm start
 ```bash
 # Core hook functionality
 forge test --match-path test/PrivateCow.t.sol -vv
-
 # Specific test functions:
 # - test_claimTokenBalances: Verifies hook token claim management
 # - test_swap_exactInput_zeroForOne: Tests token0 -> token1 swaps
 # - test_swap_exactInput_OneForZero: Tests token1 -> token0 swaps
 # - test_settleCowMatches: Validates settlement mechanism
+```
+
+For Fhenix encrypted tests (basic)
+```bash
+forge test --match-path test/PrivateCowEncrypted.t.sol -vv
+# Note: FHE operations are not executed in local tests
 ```
 
 #### Demo Scripts

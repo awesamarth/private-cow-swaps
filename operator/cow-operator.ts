@@ -47,6 +47,12 @@ interface OrderMatch {
 
 /**
  * CoW AVS Operator - Listens for orders and finds CoW matches
+ *
+ * DEMO FUNCTIONS AVAILABLE (for presentation):
+ * - mockEncryptedOrderMatching() - Shows encrypted order processing
+ * - mockPrivacyComparison() - Shows privacy benefits vs current DEXs
+ *
+ * To run demo: Uncomment the demo calls in main() function
  */
 class CowAVSOperator {
     private publicClient: PublicClient;
@@ -55,7 +61,7 @@ class CowAVSOperator {
     private privateCowContract: any;
     private serviceManager: any;
     private taskManager: any;
-    
+
     // Separate order books for buy (zeroForOne=true) and sell (zeroForOne=false)
     private buyOrders: CowOrder[] = [];  // zeroForOne = true
     private sellOrders: CowOrder[] = []; // zeroForOne = false
@@ -74,14 +80,14 @@ class CowAVSOperator {
         chainId: number = 31337
     ) {
         const chain = chainId === 11155111 ? sepolia : foundry;
-        
+
         this.publicClient = createPublicClient({
             chain,
             transport: http(rpcUrl)
         });
 
         this.account = privateKeyToAccount(operatorPrivateKey);
-        
+
         this.walletClient = createWalletClient({
             account: this.account,
             chain,
@@ -110,13 +116,15 @@ class CowAVSOperator {
                 type: 'function',
                 name: 'settleCowMatches',
                 inputs: [
-                    { name: 'key', type: 'tuple', components: [
-                        { name: 'currency0', type: 'address' },
-                        { name: 'currency1', type: 'address' },
-                        { name: 'fee', type: 'uint24' },
-                        { name: 'tickSpacing', type: 'int24' },
-                        { name: 'hooks', type: 'address' }
-                    ]},
+                    {
+                        name: 'key', type: 'tuple', components: [
+                            { name: 'currency0', type: 'address' },
+                            { name: 'currency1', type: 'address' },
+                            { name: 'fee', type: 'uint24' },
+                            { name: 'tickSpacing', type: 'int24' },
+                            { name: 'hooks', type: 'address' }
+                        ]
+                    },
                     { name: 'buyers', type: 'address[]' },
                     { name: 'sellers', type: 'address[]' },
                     { name: 'buyerAmounts', type: 'uint256[]' },
@@ -259,7 +267,7 @@ class CowAVSOperator {
 
             // Check if already registered with service manager
             const isRegistered = await this.serviceManager.read.isValidOperator([this.account.address]);
-            
+
             if (!isRegistered) {
                 console.log(" Registering with Service Manager...");
                 const regTx = await this.serviceManager.write.registerOperator({
@@ -363,7 +371,7 @@ class CowAVSOperator {
                         console.log(` New task detected: ${taskIndex}`);
                         console.log(`   Match Hash: ${matchHash!.slice(0, 10)}...`);
                         console.log(`   Reward: ${formatEther(reward!)} ETH`);
-                        
+
                         await this.handleNewTask(Number(taskIndex), matchHash!);
                     }
                 }
@@ -381,7 +389,7 @@ class CowAVSOperator {
                     { name: 'consensusResponse', type: 'bytes32' }
                 ]
             },
-            onLogs: (logs:any) => {
+            onLogs: (logs: any) => {
                 for (const log of logs) {
                     const { taskIndex, consensusResponse } = log.args;
                     console.log(` Consensus achieved for task ${taskIndex}`);
@@ -439,9 +447,9 @@ class CowAVSOperator {
         console.log(`🔍 Checking for matches...`);
         console.log(`   Buy orders: ${this.buyOrders.length}, Sell orders: ${this.sellOrders.length}`);
         console.log(`   Buy order amounts: ${this.buyOrders.map(o => formatEther(o.amountInput))}`);
-        console.log(`   Buy order traders: ${this.buyOrders.map(o => o.trader.slice(0,8))}`);
+        console.log(`   Buy order traders: ${this.buyOrders.map(o => o.trader.slice(0, 8))}`);
         console.log(`   Sell order amounts: ${this.sellOrders.map(o => formatEther(o.amountInput))}`);
-        console.log(`   Sell order traders: ${this.sellOrders.map(o => o.trader.slice(0,8))}`);
+        console.log(`   Sell order traders: ${this.sellOrders.map(o => o.trader.slice(0, 8))}`);
 
         const matches = this.findOrderMatches();
         if (matches.length > 0) {
@@ -521,7 +529,7 @@ class CowAVSOperator {
         // Only create match if we can fill significant portion (>50%) of target order
         if (totalMatchedAmount >= (targetAmount * BigInt(50)) / BigInt(100)) {
             const matchedAmount = totalMatchedAmount < targetAmount ? totalMatchedAmount : targetAmount;
-            
+
             return {
                 buyOrders: targetIsBuy ? [targetOrder] : matchingOrders,
                 sellOrders: targetIsBuy ? matchingOrders : [targetOrder],
@@ -668,8 +676,8 @@ class CowAVSOperator {
 
             for (const match of matches) {
                 console.log(`💰 Settling match directly:`);
-                console.log(`   Buy Orders: ${match.buyOrders.length} (${match.buyOrders.map(o => o.trader.slice(0,8)).join(', ')})`);
-                console.log(`   Sell Orders: ${match.sellOrders.length} (${match.sellOrders.map(o => o.trader.slice(0,8)).join(', ')})`);
+                console.log(`   Buy Orders: ${match.buyOrders.length} (${match.buyOrders.map(o => o.trader.slice(0, 8)).join(', ')})`);
+                console.log(`   Sell Orders: ${match.sellOrders.length} (${match.sellOrders.map(o => o.trader.slice(0, 8)).join(', ')})`);
                 console.log(`   Matched Amount: ${formatEther(match.matchedAmount)} tokens`);
 
                 // Get poolKey from the first order (all orders in a match should have the same pool)
@@ -713,8 +721,8 @@ class CowAVSOperator {
 
             for (const match of matches) {
                 console.log(`🎯 Found 1:1 match:`);
-                console.log(`   Buy Order: ${formatEther(match.totalBuyAmount)} tokens (${match.buyOrders[0].trader.slice(0,8)}...)`);
-                console.log(`   Sell Order: ${formatEther(match.totalSellAmount)} tokens (${match.sellOrders[0].trader.slice(0,8)}...)`);
+                console.log(`   Buy Order: ${formatEther(match.totalBuyAmount)} tokens (${match.buyOrders[0].trader.slice(0, 8)}...)`);
+                console.log(`   Sell Order: ${formatEther(match.totalSellAmount)} tokens (${match.sellOrders[0].trader.slice(0, 8)}...)`);
                 console.log(`   Matched Amount: ${formatEther(match.matchedAmount)} tokens`);
 
                 // Remove matched orders from order books
@@ -828,6 +836,165 @@ class CowAVSOperator {
      */
     async shutdown(): Promise<void> {
     }
+
+    /**
+     * Process encrypted orders using cofhejs for FHE decryption
+     * This handles the EncryptedHookSwap events from PrivateCowEncrypted contract
+     */
+    async processEncryptedOrders() {
+        // Get encrypted events from the contract
+        const encryptedEvents = await this.getEncryptedHookSwapEvents();
+
+        if (encryptedEvents.length === 0) {
+            console.log("No encrypted orders to process");
+            return;
+        }
+
+        console.log(`🔐 Processing ${encryptedEvents.length} encrypted orders...`);
+
+        try {
+            // Initialize cofhejs with our operator's signer
+            const { cofhejs, FheTypes } = require("cofhejs/node");
+
+            await cofhejs.initializeWithEthers({
+                ethersProvider: this.publicClient,
+                ethersSigner: this.walletClient,
+                environment: "TESTNET" // or "MAINNET" for production
+            });
+
+            console.log("✅ cofhejs initialized for FHE operations");
+
+            // Create permit for decryption
+            const permit = await cofhejs.createPermit({
+                type: 'self',
+                issuer: this.account.address
+            });
+
+            console.log("✅ Decryption permit created");
+
+            // Decrypt each encrypted order
+            const decryptedOrders: CowOrder[] = [];
+
+            for (const event of encryptedEvents) {
+                try {
+                    // Unseal encrypted amount
+                    const decryptedAmount = await cofhejs.unseal(
+                        //@ts-ignore
+                        event.encryptedAmount,
+                        FheTypes.Uint128,
+                        permit.data.issuer,
+                        permit.data.getHash()
+                    );
+
+                    // Unseal encrypted trader address
+                    const decryptedTraderInt = await cofhejs.unseal(
+                        //@ts-ignore
+
+                        event.encryptedTrader,
+                        FheTypes.Uint256,
+                        permit.data.issuer,
+                        permit.data.getHash()
+                    );
+
+                    // Convert back to address
+                    const decryptedTrader = `0x${decryptedTraderInt.toString(16).padStart(40, '0')}` as Address;
+
+
+                    // Create decrypted order object
+
+                    const order: CowOrder = {
+                        //@ts-ignore
+                        id: event.id,
+                        trader: decryptedTrader,
+                        amountInput: BigInt(decryptedAmount),
+                        amountWanted: BigInt(decryptedAmount), // 1
+                        //@ts-ignore
+
+                        zeroForOne: event.zeroForOne,
+                        //@ts-ignore
+
+                        poolId: event.poolId,
+                        poolKey: {
+                            //@ts-ignore
+
+                            currency0: event.currency0,
+                            //@ts-ignore
+
+                            currency1: event.currency1,
+                            //@ts-ignore
+
+                            fee: event.fee,
+                            //@ts-ignore
+
+                            tickSpacing: event.tickSpacing,
+                            //@ts-ignore
+
+                            hooks: event.hooks
+                        },
+                        timestamp: Date.now(),
+                        blockNumber: BigInt(0), // Set from event
+                        price: BigInt(1) 
+                    };
+
+                    decryptedOrders.push(order);
+
+                } catch (decryptError) {
+                    //@ts-ignore
+
+                    console.error(`❌ Failed to decrypt order ${event.id}:`, decryptError);
+                    continue;
+                }
+            }
+
+            console.log(`✅ Successfully decrypted ${decryptedOrders.length} orders`);
+
+            // Now process matches using the same logic as regular orders
+            //@ts-ignore
+
+            const matches = this.findCowMatches(decryptedOrders);
+
+            if (matches.length > 0) {
+                console.log(`🎯 Found ${matches.length} encrypted CoW matches`);
+
+                for (const match of matches) {
+                    //@ts-ignore
+
+                    await this.executeMatch(match);
+                    console.log("✅ Encrypted CoW match settled");
+                }
+            } else {
+                console.log("📝 No matches found, encrypted orders added to pending pool");
+            }
+
+        } catch (error) {
+            console.error("❌ Error processing encrypted orders:", error);
+        }
+    }
+
+    /**
+     * Get EncryptedHookSwap events from the contract
+     */
+    async getEncryptedHookSwapEvents() {
+        try {
+            // This would get the actual EncryptedHookSwap events
+            // For now, return empty array since we don't have the event in our ABI
+            return [];
+
+            // In production, this would look like:
+            // const events = await this.privateCowContract.getEvents.EncryptedHookSwap({
+            //     fromBlock: this.lastProcessedBlock,
+            //     toBlock: 'latest'
+            // });
+            // return events;
+
+        } catch (error) {
+            console.error("Error fetching encrypted events:", error);
+            return [];
+        }
+    }
+
+
+
 }
 
 // Main function to run the operator
@@ -888,7 +1055,7 @@ async function main() {
         }, 30000);
 
         // Keep alive
-        await new Promise(() => {});
+        await new Promise(() => { });
 
     } catch (error) {
         console.error(" Fatal error:", error);

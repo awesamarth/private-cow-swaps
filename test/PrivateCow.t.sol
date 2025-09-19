@@ -70,7 +70,6 @@ contract PrivateCowTest is Test, Deployers {
         uint256 token0ClaimID = CurrencyLibrary.toId(currency0);
 
         uint256 token0ClaimsBalance = manager.balanceOf(address(hook), token0ClaimID);
-        console.log("token 0 claim balance: ", token0ClaimsBalance);
 
         assertEq(token0ClaimsBalance, 1000 ether);
     }
@@ -90,11 +89,7 @@ contract PrivateCowTest is Test, Deployers {
             abi.encode(alice)
         );
         uint256 balanceOfTokenAAfter = key.currency0.balanceOf(alice);
-        console.log(currency0.balanceOf(alice));
-        uint256 token0ClaimID = CurrencyLibrary.toId(currency0);
 
-        uint256 token0ClaimsBalance = manager.balanceOf(address(hook), token0ClaimID);
-        console.log("token 0 claim balance of hook is: ", token0ClaimsBalance);
 
         assertEq(balanceOfTokenABefore - balanceOfTokenAAfter, 100e18);
     }
@@ -113,30 +108,17 @@ contract PrivateCowTest is Test, Deployers {
             abi.encode(10342340)
         );
         uint256 balanceOfTokenBAfter = key.currency1.balanceOf(alice);
-        console.log(currency1.balanceOf(alice));
-        uint256 token1ClaimID = CurrencyLibrary.toId(currency1);
 
-        uint256 token1ClaimsBalance = manager.balanceOf(address(hook), token1ClaimID);
-        console.log("token 1 claim balance of alice is: ", token1ClaimsBalance);
 
         assertEq(balanceOfTokenBBefore - balanceOfTokenBAfter, 100e18);
     }
 
     function test_settleCowMatches() public {
-        // Check pool has liquidity first
-        uint256 hookToken0 = manager.balanceOf(address(hook), key.currency0.toId());
-        uint256 hookToken1 = manager.balanceOf(address(hook), key.currency1.toId());
-        console.log("Hook token0 claims:", hookToken0);
-        console.log("Hook token1 claims:", hookToken1);
+
 
         // Check Alice's initial balances
-        uint256 aliceToken0Before = key.currency0.balanceOf(alice);
         uint256 aliceToken1Before = key.currency1.balanceOf(alice);
-        uint256 aliceToken1Claims = manager.balanceOf(alice, key.currency1.toId());
 
-        console.log("Alice token0 balance before:", aliceToken0Before);
-        console.log("Alice token1 balance before:", aliceToken1Before);
-        console.log("Alice token1 claims in test:", aliceToken1Claims);
 
         // Prepare settlement data - Alice and Bob both as buyer and seller (simplest test)
         address[] memory buyers = new address[](1);
@@ -161,12 +143,8 @@ contract PrivateCowTest is Test, Deployers {
             sellerAmounts
         );
 
-        // Check Alice's balances after settlement
-        uint256 aliceToken0After = key.currency0.balanceOf(alice);
         uint256 aliceToken1After = key.currency1.balanceOf(alice);
 
-        console.log("Alice token0 balance after:", aliceToken0After);
-        console.log("Alice token1 balance after:", aliceToken1After);
 
         // Alice should have received 50 token1
         assertEq(aliceToken1After, aliceToken1Before + 50 ether);

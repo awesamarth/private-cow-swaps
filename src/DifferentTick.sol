@@ -12,13 +12,6 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {console} from "forge-std/console.sol";
 
-// A CSMM is a pricing curve that follows the invariant `x + y = k`
-// instead of the invariant `x * y = k`
-// This is a super simple CSMM PoC that hardcodes 1:1 swaps through a custom pricing curve hook
-
-// This is theoretically the ideal curve for a stablecoin or pegged pairs (stETH/ETH)
-// In practice, we don't usually see this in prod since depegs can happen and we dont want exact equal amounts
-// But is a nice little NoOp hook example
 
 contract PrivateCow is BaseHook {
     using CurrencySettler for Currency;
@@ -98,7 +91,6 @@ contract PrivateCow is BaseHook {
         callbackData.currency1.settle(poolManager, callbackData.sender, callbackData.amountEach, false);
 
         // We will store those claim tokens with the hook, so when swaps take place
-        // liquidity from our CSMM can be used by minting/burning claim tokens the hook owns
         callbackData.currency0.take(
             poolManager,
             address(this),

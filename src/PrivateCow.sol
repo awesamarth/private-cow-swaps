@@ -12,13 +12,8 @@ import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
 import {console} from "forge-std/console.sol";
 
-// A CSMM is a pricing curve that follows the invariant `x + y = k`
-// instead of the invariant `x * y = k`
-// This is a super simple CSMM PoC that hardcodes 1:1 swaps through a custom pricing curve hook
 
-// This is theoretically the ideal curve for a stablecoin or pegged pairs (stETH/ETH)
-// In practice, we don't usually see this in prod since depegs can happen and we dont want exact equal amounts
-// But is a nice little NoOp hook example
+
 
 contract PrivateCow is BaseHook {
     using CurrencySettler for Currency;
@@ -119,7 +114,6 @@ contract PrivateCow is BaseHook {
             cowMatch := calldataload(add(data.offset, 0))
         }
 
-        console.log("cowMatch decoded:", cowMatch);
 
         if (!cowMatch) {
             CallbackData memory callbackData = abi.decode(data, (CallbackData));
@@ -131,22 +125,13 @@ contract PrivateCow is BaseHook {
             callbackData.currency0.take(poolManager, address(this), callbackData.amountEach, true);
             callbackData.currency1.take(poolManager, address(this), callbackData.amountEach, true);
         } else {
-            console.log("unlock type is settle cow matches");
 
             CowSettleData memory cowData = abi.decode(data, (CowSettleData));
 
-            console.log("buyers length:", cowData.buyers.length);
-            console.log("sellers length:", cowData.sellers.length);
 
             // Give token1 to buyers (who deposited token0)
             for (uint256 i = 0; i < cowData.buyers.length; i++) {
-                console.log("settling buyer:", cowData.buyers[i]);
-                console.log("buyer amount:", cowData.buyerAmounts[i]);
 
-                uint256 hookToken1Claims = poolManager.balanceOf(address(this), cowData.currency1.toId());
-                uint256 buyerToken1Claims = poolManager.balanceOf(cowData.buyers[i], cowData.currency1.toId());
-                console.log("Hook token1 claims:", hookToken1Claims);
-                console.log("Buyer token1 claims before settle:", buyerToken1Claims);
 
                 // Hook burns its token1 claims
                 cowData.currency1.settle(poolManager, address(this), cowData.buyerAmounts[i], true);
@@ -156,8 +141,6 @@ contract PrivateCow is BaseHook {
 
             // Give token0 to sellers (who deposited token1)
             for (uint256 i = 0; i < cowData.sellers.length; i++) {
-                console.log("settling seller:", cowData.sellers[i]);
-                console.log("seller amount:", cowData.sellerAmounts[i]);
                 // Hook burns its token0 claims
                 cowData.currency0.settle(poolManager, address(this), cowData.sellerAmounts[i], true);
                 // Bob gets real token0 (not claims)
@@ -177,7 +160,6 @@ contract PrivateCow is BaseHook {
     ) internal {
         if (hookData.length > 0) {
             address addressOfSender = abi.decode(hookData, (address));
-            console.log("address of trader", addressOfSender);
 
             emit HookSwap(
                 PoolId.unwrap(key.toId()),
@@ -254,13 +236,6 @@ contract PrivateCow is BaseHook {
         require(buyers.length == buyerAmounts.length && sellers.length == sellerAmounts.length, "Array length mismatch");
 
         console.log("calling unlock on poolmanager via cow contract");
-
-        console.log("currency0: ", Currency.unwrap(key.currency0));
-        console.log("currency1: ", Currency.unwrap(key.currency1));
-        console.log("buyers: ", buyers[0]);
-        console.log("sellers: ", sellers[0]);
-        console.log("buyer amounts: ", buyerAmounts[0]);
-        console.log("seller amounts: ", sellerAmounts[0]);
 
         poolManager.unlock(
             abi.encode(
